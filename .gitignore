@@ -1,0 +1,6 @@
+# Ignore Python virtual environment directories
+venv/
+
+# Ignore cloned repositories
+kubefleet/
+istio/
