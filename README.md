@@ -1,2 +1,5 @@
-# kubefleet-multicluster-ai-with-kaito
-How to use KubeFleet to manage multicluster AI in conjunction with KAITO
+# KubeFleet Cookbook
+
+A collection of various demos, tutorials, and labs for using the KubeFleet project.
+
+**WIP**
