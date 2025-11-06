@@ -22,18 +22,22 @@ data:
 
     tools:
       enabled: {{ .Values.config.tools.enabled }}
+{{- if .Values.config.tools.enabled }}
       top_k: {{ .Values.config.tools.topK }}
       similarity_threshold: {{ .Values.config.tools.similarityThreshold }}
       tools_db_path: {{ .Values.config.tools.toolsDbPath | quote }}
       fallback_to_empty: {{ .Values.config.tools.fallbackToEmpty }}
+{{- end }}
 
     prompt_guard:
       enabled: {{ .Values.config.promptGuard.enabled }}
+{{- if .Values.config.promptGuard.enabled }}
       use_modernbert: {{ .Values.config.promptGuard.useModernbert }}
       model_id: {{ .Values.config.promptGuard.modelId | quote }}
       threshold: {{ .Values.config.promptGuard.threshold }}
       use_cpu: {{ .Values.config.promptGuard.useCpu }}
       jailbreak_mapping_path: {{ .Values.config.promptGuard.jailbreakMappingPath | quote }}
+{{- end }}
 
     vllm_endpoints:
     {{- range .Values.config.vllmEndpoints }}

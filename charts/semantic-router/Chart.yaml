@@ -3,7 +3,7 @@ name: semantic-router
 description: A Helm chart for Semantic Router - Intelligent Mixture-of-Models Router for Efficient LLM Inference
 type: application
 version: 0.1.0
-appVersion: "latest"
+appVersion: "604225170261470c0dd6c40c4150cc6b79bd44f5"
 keywords:
   - semantic-router
   - llm
