@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "semantic-router.fullname" . }}-config
+  namespace: {{ include "semantic-router.namespace" . }}
+  labels:
+    {{- include "semantic-router.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    bert_model:
+      model_id: {{ .Values.config.bertModel.modelId }}
+      threshold: {{ .Values.config.bertModel.threshold }}
+      use_cpu: {{ .Values.config.bertModel.useCpu }}
+
+    semantic_cache:
+      enabled: {{ .Values.config.semanticCache.enabled }}
+      backend_type: {{ .Values.config.semanticCache.backendType | quote }}
+      similarity_threshold: {{ .Values.config.semanticCache.similarityThreshold }}
+      max_entries: {{ .Values.config.semanticCache.maxEntries }}
+      ttl_seconds: {{ .Values.config.semanticCache.ttlSeconds }}
+      eviction_policy: {{ .Values.config.semanticCache.evictionPolicy | quote }}
+
+    tools:
+      enabled: {{ .Values.config.tools.enabled }}
+      top_k: {{ .Values.config.tools.topK }}
+      similarity_threshold: {{ .Values.config.tools.similarityThreshold }}
+      tools_db_path: {{ .Values.config.tools.toolsDbPath | quote }}
+      fallback_to_empty: {{ .Values.config.tools.fallbackToEmpty }}
+
+    prompt_guard:
+      enabled: {{ .Values.config.promptGuard.enabled }}
+      use_modernbert: {{ .Values.config.promptGuard.useModernbert }}
+      model_id: {{ .Values.config.promptGuard.modelId | quote }}
+      threshold: {{ .Values.config.promptGuard.threshold }}
+      use_cpu: {{ .Values.config.promptGuard.useCpu }}
+      jailbreak_mapping_path: {{ .Values.config.promptGuard.jailbreakMappingPath | quote }}
+
+    vllm_endpoints:
+    {{- range .Values.config.vllmEndpoints }}
+      - name: {{ .name | quote }}
+        address: {{ .address | quote }}
+        port: {{ .port }}
+        weight: {{ .weight }}
+    {{- end }}
+
+    model_config:
+    {{- range $key, $value := .Values.config.modelConfig }}
+      {{ $key | quote }}:
+        reasoning_family: {{ $value.reasoningFamily | quote }}
+        preferred_endpoints:
+        {{- range $value.preferredEndpoints }}
+          - {{ . | quote }}
+        {{- end }}
+        pii_policy:
+          allow_by_default: {{ $value.piiPolicy.allowByDefault }}
+    {{- end }}
+
+    classifier:
+      category_model:
+        model_id: {{ .Values.config.classifier.categoryModel.modelId | quote }}
+        use_modernbert: {{ .Values.config.classifier.categoryModel.useModernbert }}
+        threshold: {{ .Values.config.classifier.categoryModel.threshold }}
+        use_cpu: {{ .Values.config.classifier.categoryModel.useCpu }}
+        category_mapping_path: {{ .Values.config.classifier.categoryModel.categoryMappingPath | quote }}
+
+    categories:
+    {{- range .Values.config.categories }}
+      - name: {{ .name }}
+        model_scores:
+        {{- range .modelScores }}
+          - model: {{ .model }}
+            score: {{ .score }}
+            use_reasoning: {{ .useReasoning }}
+        {{- end }}
+    {{- end }}
+
+    default_model: {{ .Values.config.defaultModel }}
+
+    reasoning_families:
+    {{- range $key, $value := .Values.config.reasoningFamilies }}
+      {{ $key }}:
+        type: {{ $value.type | quote }}
+        parameter: {{ $value.parameter | quote }}
+    {{- end }}
+
+    default_reasoning_effort: {{ .Values.config.defaultReasoningEffort }}
+
+    clear_route_cache: {{ .Values.config.clearRouteCache }}
+
+    api:
+      batch_classification:
+        max_batch_size: {{ .Values.config.api.batchClassification.maxBatchSize }}
+        concurrency_threshold: {{ .Values.config.api.batchClassification.concurrencyThreshold }}
+        max_concurrency: {{ .Values.config.api.batchClassification.maxConcurrency }}
+        metrics:
+          enabled: {{ .Values.config.api.batchClassification.metrics.enabled }}
+          detailed_goroutine_tracking: {{ .Values.config.api.batchClassification.metrics.detailedGoroutineTracking }}
+          high_resolution_timing: {{ .Values.config.api.batchClassification.metrics.highResolutionTiming }}
+          sample_rate: {{ .Values.config.api.batchClassification.metrics.sampleRate }}
+          duration_buckets: {{ toJson .Values.config.api.batchClassification.metrics.durationBuckets }}
+          size_buckets: {{ toJson .Values.config.api.batchClassification.metrics.sizeBuckets }}
