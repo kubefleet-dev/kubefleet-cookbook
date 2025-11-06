@@ -103,11 +103,11 @@ is up and running:
 
     You should see from the response that the query is being served by the Phi model.
 
-    > Note: the tutorial featuers a semantic router that classifies queries based on their categories and sends queries to a LLM that is best equipped to process the category. The process is partly non-deterministic due to the nature of LLM. If you believe that a query belongs to a specific category but is not served by the expected LLM; tweak the query text a bit and give it another try.
+    > Note: the tutorial features a semantic router that classifies queries based on their categories and sends queries to a LLM that is best equipped to process the category. The process is partly non-deterministic due to the nature of LLM. If you believe that a query belongs to a specific category but is not served by the expected LLM; tweak the query text a bit and give it another try.
 
 ## Additional steps
 
-You can set up the LiteLLM proxy to interact with the models using a UI. Follow the steps in the [LiteLLM setup README](./litellm/README.md) to complete the setup.
+You can set up the LiteLLM proxy to interact with the models using a web UI. Follow the steps in the [LiteLLM setup README](./litellm/README.md) to complete the setup.
 
 ## Clean things up
 
@@ -118,5 +118,12 @@ export RG="${RG:-kubefleet-kaito-demo-2025}"
 az group delete -n $RG
 ```
 
+## Questions or comments?
+
+If you have any questions or comments please using our [Q&A Discussions](https://github.com/kubefleet-dev/kubefleet/discussions/categories/q-a). 
+
+If you find a bug or the solution doesn't work, please open an [Issue](https://github.com/kubefleet-dev/kubefleet/issues/new) so we can take a look. We welcome submissions too, so if you find a fix please open a PR!
+
+Also, consider coming to a [Community Meeting](https://bit.ly/kubefleet-cm-meeting) too!
 
 
