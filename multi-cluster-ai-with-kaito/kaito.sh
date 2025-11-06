@@ -4,7 +4,7 @@ function prep_kaito_setup() {
     helm repo update
 
     echo "Retrieving the KAITO GPU Provisioner setup script..."
-    GPU_PROVISIONER_VERSION=0.3.6
+    GPU_PROVISIONER_VERSION=0.3.7
     curl -sO https://raw.githubusercontent.com/Azure/gpu-provisioner/main/hack/deploy/configure-helm-values.sh
 }
 
@@ -15,6 +15,7 @@ function install_kaito_core() {
         --namespace kaito-workspace \
         --create-namespace \
         --set clusterName="$1" \
+        --set featureGates.gatewayAPIInferenceExtension=true \
         --wait
 }
 

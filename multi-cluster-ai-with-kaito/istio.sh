@@ -3,18 +3,17 @@ function prep_istio_setup() {
     git clone https://github.com/istio/istio.git
     pushd istio
 
-    ISTIO_TAG=$(curl https://storage.googleapis.com/istio-build/dev/1.28-dev)
     git fetch --all
-    git checkout 1.28.0-beta.1
+    git checkout $ISTIO_TAG
 }
 
 function connect_to_multi_cluster_service_mesh() {
     echo "Connecting AKS cluster $1 to the multi-cluster Istio service mesh..."
     kubectl config use-context $2
     go run ./istioctl/cmd/istioctl install \
-        --context $2\
+        --context $2 \
         --set tag=$ISTIO_TAG \
-        --set hub=gcr.io/istio-testing \
+        --set hub=gcr.io/istio-release \
         --set values.global.meshID=simplemesh \
         --set values.global.multiCluster.clusterName=$1 \
         --set values.global.network=simplenet \

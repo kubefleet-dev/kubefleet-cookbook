@@ -4,7 +4,10 @@ set -o nounset
 set -o pipefail
 
 # Required variables.
-if [ -z "$SUBSCRIPTION" ]; then echo "Variable SUBSCRIPTION is not set"; fi
+if [ -z "$SUBSCRIPTION" ]; then
+    echo "Variable SUBSCRIPTION is not set"
+    exit 1
+fi
 
 # Default configuration for the setup.
 RG="${RG:-kubefleet-kaito-demo-2025}"
@@ -45,6 +48,9 @@ RESOURCE_SNAPSHOT_CREATION_MINIMUM_INTERVAL="0m"
 RESOURCE_CHANGES_COLLECTION_DURATION="0m"
 REGISTRY="$ACR.azurecr.io"
 TAG="demo"
+
+# The configuration below are for the Istio setup; in most cases they do not need to be changed.
+ISTIO_TAG=1.28.0-beta.1
 
 # Source the utility functions.
 source ./azresources.sh
