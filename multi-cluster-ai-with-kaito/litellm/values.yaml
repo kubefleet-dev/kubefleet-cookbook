@@ -1,0 +1,28 @@
+db:
+  deployStandalone: false
+  # Use an existing postgres server/cluster
+  useExisting: true
+
+  # How to connect to the existing postgres server/cluster
+  endpoint: YOUR-POSTGRES-ENDPOINT
+  database: litellm
+  url: postgresql://$(DATABASE_USERNAME):$(DATABASE_PASSWORD)@$(DATABASE_HOST)/$(DATABASE_NAME)
+  secret:
+    name: postgres
+    usernameKey: username
+    passwordKey: password
+
+# The elements within proxy_config are rendered as config.yaml for the proxy
+#  Examples: https://github.com/BerriAI/litellm/tree/main/litellm/proxy/example_config_yaml
+#  Reference: https://docs.litellm.ai/docs/proxy/configs
+proxy_config:
+  model_list:
+    # At least one model must exist for the proxy to start; this model might not actually exist.
+    - model_name: phi-4 # used in litellm proxy
+      litellm_params:
+        model: openai/$KAITO_MODEL_NAME  # openai prefix is required
+        api_key: fake-key
+        api_base: http://$WORKSPACE_SVC/v1
+  general_settings:
+    master_key: os.environ/PROXY_MASTER_KEY
+    store_model_in_db: true

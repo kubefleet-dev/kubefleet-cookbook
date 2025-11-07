@@ -1,2 +1,4 @@
 # KubeFleet Cookbook
-Examples and guides on using KubeFleet to manage multicluster scenarios.
+
+A collection of various demos, tutorials, and labs for using the KubeFleet project.
+

@@ -1,0 +1,12 @@
+# Ignore Python virtual environment directories
+venv/
+
+# Ignore cloned repositories for specific projects
+multi-cluster-ai-with-kaito/kubefleet/
+multi-cluster-ai-with-kaito/istio/
+multi-cluster-ai-with-kaito/semantic-router/
+
+# Ignore downloaded files for specific projects
+multi-cluster-ai-with-kaito/configure-helm-values.sh
+multi-cluster-ai-with-kaito/gpu-provisioner-values-template.yaml
+multi-cluster-ai-with-kaito/gpu-provisioner-values.yaml
