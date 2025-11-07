@@ -125,5 +125,3 @@ If you have any questions or comments please using our [Q&A Discussions](https:/
 If you find a bug or the solution doesn't work, please open an [Issue](https://github.com/kubefleet-dev/kubefleet/issues/new) so we can take a look. We welcome submissions too, so if you find a fix please open a PR!
 
 Also, consider coming to a [Community Meeting](https://bit.ly/kubefleet-cm-meeting) too!
-
-
