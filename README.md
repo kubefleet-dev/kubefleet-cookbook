@@ -34,3 +34,6 @@ please raise a [GitHub issue](https://github.com/kubefleet-dev/cookbook/issues).
 
 Copyright The KubeFleet Authors. The Linux Foundation® (TLF) has registered trademarks and uses trademarks.
 For a list of TLF trademarks, see [Trademark Usage](https://www.linuxfoundation.org/trademark-usage/).
+=======
+A collection of various demos, tutorials, and labs for using the KubeFleet project.
+
