@@ -1,0 +1,18 @@
+apiVersion: v2
+name: semantic-router
+description: A Helm chart for Semantic Router - Intelligent Mixture-of-Models Router for Efficient LLM Inference
+type: application
+version: 0.1.0
+appVersion: "604225170261470c0dd6c40c4150cc6b79bd44f5"
+keywords:
+  - semantic-router
+  - llm
+  - inference
+  - routing
+  - ai
+home: https://github.com/vllm-project/semantic-router
+sources:
+  - https://github.com/vllm-project/semantic-router
+maintainers:
+  - name: vLLM Project
+    email: maintainers@vllm.ai

@@ -1,0 +1,314 @@
+# Default values for semantic-router
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Global settings
+global:
+  namespace: vllm-semantic-router-system
+
+# Image settings
+image:
+  repository: ghcr.io/vllm-project/semantic-router/extproc
+  pullPolicy: Always
+  tag: 604225170261470c0dd6c40c4150cc6b79bd44f5
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Deployment settings
+replicaCount: 1
+
+# Security settings
+securityContext:
+  runAsNonRoot: false
+  allowPrivilegeEscalation: false
+
+# Service settings
+service:
+  type: ClusterIP
+  grpc:
+    port: 50051
+    name: grpc
+  api:
+    port: 8080
+    name: classify-api
+  metrics:
+    enabled: true
+    port: 9190
+    name: metrics
+
+# Resource limits
+resources:
+  # Init container resources
+  initContainer:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  # Main container resources
+  mainContainer:
+    requests:
+      memory: "3Gi"
+      cpu: "1"
+    limits:
+      memory: "6Gi"
+      cpu: "2"
+
+# Probes configuration
+livenessProbe:
+  enabled: true
+  tcpSocket:
+    port: grpc
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  tcpSocket:
+    port: grpc
+  initialDelaySeconds: 90
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+# Persistent Volume settings
+persistence:
+  enabled: true
+  storageClassName: azurefile
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  annotations: {}
+
+# Models to download
+models:
+  download:
+    enabled: true
+    # List of models to download from Hugging Face
+    list:
+      - name: category_classifier_modernbert-base_model
+        repo: LLM-Semantic-Router/category_classifier_modernbert-base_model
+
+# Configuration
+config:
+  # BERT Model Configuration
+  bertModel:
+    modelId: sentence-transformers/all-MiniLM-L12-v2
+    threshold: 0.6
+    useCpu: true
+
+  # Semantic Cache Configuration
+  semanticCache:
+    enabled: true
+    backendType: memory  # Options: "memory" or "milvus"
+    similarityThreshold: 0.8
+    maxEntries: 1000
+    ttlSeconds: 3600
+    evictionPolicy: fifo
+
+  # Tools Configuration
+  tools:
+    enabled: false
+
+  # Prompt Guard Configuration
+  promptGuard:
+    enabled: false
+
+  # vLLM Endpoints Configuration
+  # These endpoints are only used as a place holder, and envoy gateway will route to actual model endpoints according to the selected model by semantic-router.
+  vllmEndpoints:
+    - name: "deepseek-endpoint"
+      address: "127.0.0.1"
+      port: 9002
+      weight: 1
+    - name: "phi4-endpoint"
+      address: "127.0.0.1"
+      port: 9003
+      weight: 1
+
+  # Model Configuration
+  modelConfig:
+    "deepseek-r1-distill-qwen-14b":
+      reasoningFamily: "deepseek"
+      preferredEndpoints: ["deepseek-endpoint"]
+      piiPolicy:
+        allowByDefault: true
+    "phi-4":
+      reasoningFamily: ""  # phi-4 does not support reasoning
+      preferredEndpoints: ["phi4-endpoint"]
+      piiPolicy:
+        allowByDefault: true
+
+  # Classifier Configuration
+  classifier:
+    categoryModel:
+      modelId: "models/category_classifier_modernbert-base_model"
+      useModernbert: true
+      threshold: 0.6
+      useCpu: true
+      categoryMappingPath: "models/category_classifier_modernbert-base_model/category_mapping.json"
+
+  # Categories Configuration
+  categories:
+    - name: business
+      modelScores:
+        - model: phi-4
+          score: 0.85
+          useReasoning: false
+        - model: deepseek-r1-distill-qwen-14b
+          score: 0.7
+          useReasoning: false
+    - name: law
+      modelScores:
+        - model: deepseek-r1-distill-qwen-14b
+          score: 0.9
+          useReasoning: true
+        - model: phi-4
+          score: 0.4
+          useReasoning: false
+    - name: psychology
+      modelScores:
+        - model: phi-4
+          score: 0.8
+          useReasoning: false
+        - model: deepseek-r1-distill-qwen-14b
+          score: 0.6
+          useReasoning: false
+    - name: biology
+      modelScores:
+        - model: deepseek-r1-distill-qwen-14b
+          score: 0.9
+          useReasoning: true
+        - model: phi-4
+          score: 0.8
+          useReasoning: false
+    - name: chemistry
+      modelScores:
+        - model: deepseek-r1-distill-qwen-14b
+          score: 1.0
+          useReasoning: true
+        - model: phi-4
+          score: 0.6
+          useReasoning: false
+    - name: history
+      modelScores:
+        - model: phi-4
+          score: 0.85
+          useReasoning: false
+        - model: deepseek-r1-distill-qwen-14b
+          score: 0.7
+          useReasoning: false
+    - name: other
+      modelScores:
+        - model: phi-4
+          score: 0.9
+          useReasoning: false
+        - model: deepseek-r1-distill-qwen-14b
+          score: 0.6
+          useReasoning: false
+    - name: health
+      modelScores:
+        - model: deepseek-r1-distill-qwen-14b
+          score: 0.8
+          useReasoning: true
+        - model: phi-4
+          score: 0.5
+          useReasoning: false
+    - name: economics
+      modelScores:
+        - model: deepseek-r1-distill-qwen-14b
+          score: 1.0
+          useReasoning: true
+        - model: phi-4
+          score: 0.8
+          useReasoning: false
+    - name: math
+      modelScores:
+        - model: deepseek-r1-distill-qwen-14b
+          score: 1.0
+          useReasoning: true
+        - model: phi-4
+          score: 0.8
+          useReasoning: false
+    - name: physics
+      modelScores:
+        - model: deepseek-r1-distill-qwen-14b
+          score: 1.0
+          useReasoning: true
+        - model: phi-4
+          score: 0.7
+          useReasoning: false
+    - name: "computer science"
+      modelScores:
+        - model: deepseek-r1-distill-qwen-14b
+          score: 0.9
+          useReasoning: true
+        - model: phi-4
+          score: 0.8
+          useReasoning: false
+    - name: philosophy
+      modelScores:
+        - model: deepseek-r1-distill-qwen-14b
+          score: 0.8
+          useReasoning: true
+        - model: phi-4
+          score: 0.5
+          useReasoning: false
+    - name: engineering
+      modelScores:
+        - model: deepseek-r1-distill-qwen-14b
+          score: 0.9
+          useReasoning: true
+        - model: phi-4
+          score: 0.7
+          useReasoning: false
+
+  # Default Model
+  defaultModel: deepseek-r1-distill-qwen-14b
+
+  # Reasoning Families Configuration
+  reasoningFamilies:
+    deepseek:
+      type: "chat_template_kwargs"
+      parameter: "thinking"
+    qwen3:
+      type: "chat_template_kwargs"
+      parameter: "enable_thinking"
+    gpt-oss:
+      type: "reasoning_effort"
+      parameter: "reasoning_effort"
+    gpt:
+      type: "reasoning_effort"
+      parameter: "reasoning_effort"
+
+  # Default Reasoning Effort
+  defaultReasoningEffort: high
+
+  clearRouteCache: true
+
+  # API Configuration
+  api:
+    batchClassification:
+      maxBatchSize: 100
+      concurrencyThreshold: 5
+      maxConcurrency: 8
+      metrics:
+        enabled: true
+        detailedGoroutineTracking: true
+        highResolutionTiming: false
+        sampleRate: 1.0
+        durationBuckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30]
+        sizeBuckets: [1, 2, 5, 10, 20, 50, 100, 200]
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
