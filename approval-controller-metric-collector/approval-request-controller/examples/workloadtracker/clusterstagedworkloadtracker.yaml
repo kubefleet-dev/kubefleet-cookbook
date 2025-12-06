@@ -1,0 +1,8 @@
+apiVersion: metric.kubernetes-fleet.io/v1alpha1
+kind: ClusterStagedWorkloadTracker
+metadata:
+  # The name must match the name of the ClusterStagedUpdateRun it is used for
+  name: example-cluster-staged-run
+workloads:
+  - name: sample-metric-app
+    namespace: test-ns

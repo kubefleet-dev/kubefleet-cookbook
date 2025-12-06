@@ -1,0 +1,10 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: ClusterStagedUpdateRun
+metadata:
+  name: example-cluster-staged-run
+spec:
+  placementName: example-crp
+  resourceSnapshotIndex: "0"
+  stagedRolloutStrategyName: example-cluster-staged-strategy
+  state: Run
+  

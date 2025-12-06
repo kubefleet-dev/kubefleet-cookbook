@@ -1,0 +1,11 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: StagedUpdateRun
+metadata:
+  name: example-staged-run
+  namespace: test-ns
+spec:
+  placementName: example-rp
+  resourceSnapshotIndex: "0"
+  stagedRolloutStrategyName: example-staged-strategy
+  state: Run
+  
