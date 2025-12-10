@@ -237,10 +237,10 @@ You can create staged updates using either cluster-scoped or namespace-scoped re
 Switch back to hub cluster and create a cluster-scoped staged update run:
 
 ```bash
+cd ../approval-request-controller
+
 # Switch to hub cluster
 kubectl config use-context kind-hub
-
-cd ../approval-request-controller
 
 # Apply ClusterStagedUpdateStrategy
 kubectl apply -f ./examples/updateRun/example-csus.yaml
@@ -278,10 +278,10 @@ example-cluster-staged-run   example-crp   0                         0          
 Alternatively, you can use namespace-scoped resources:
 
 ```bash
+cd ../approval-request-controller
+
 # Switch to hub cluster
 kubectl config use-context kind-hub
-
-cd ../approval-request-controller
 ```
 
 ``` bash
@@ -301,16 +301,6 @@ proemetheus-crp   1     True        1               True        1               
 ```bash
 # Apply StagedUpdateStrategy
 kubectl apply -f ./examples/updateRun/example-sus.yaml
-
-# Verify SUS is created
-kubectl get sus -A
-```
-
-Output:
-```bash
-NAMESPACE   NAME                      AGE
-test-ns     example-staged-strategy   4s
-```
 
 ```bash
 # Apply ResourcePlacement

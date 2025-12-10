@@ -42,7 +42,7 @@ rules:
   
   # WorkloadTracker (our custom resource)
   - apiGroups: ["metric.kubernetes-fleet.io"]
-    resources: ["clusterstagedworkloadtrackers, stagedworkloadtrackers"]
+    resources: ["clusterstagedworkloadtrackers", "stagedworkloadtrackers"]
     verbs: ["get", "list", "watch"]
   
   # Events
