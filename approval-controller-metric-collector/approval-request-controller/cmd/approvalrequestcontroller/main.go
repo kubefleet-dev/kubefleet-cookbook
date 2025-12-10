@@ -40,7 +40,7 @@ import (
 )
 
 var (
-	scheme   = runtime.NewScheme()
+	scheme = runtime.NewScheme()
 )
 
 func init() {
@@ -131,7 +131,8 @@ func checkRequiredCRDs(config *rest.Config) error {
 		"clusterapprovalrequests.placement.kubernetes-fleet.io",
 		"metriccollectors.metric.kubernetes-fleet.io",
 		"metriccollectorreports.metric.kubernetes-fleet.io",
-		"workloadtrackers.metric.kubernetes-fleet.io",
+		"clusterstagedworkloadtrackers.metric.kubernetes-fleet.io",
+		"stagedworkloadtrackers.metric.kubernetes-fleet.io",
 		"clusterresourceplacements.placement.kubernetes-fleet.io",
 		"clusterresourceoverrides.placement.kubernetes-fleet.io",
 		"clusterstagedupdateruns.placement.kubernetes-fleet.io",

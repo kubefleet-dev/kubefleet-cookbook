@@ -118,8 +118,10 @@ This will create:
 
 Switch to hub cluster context and register the member clusters:
 
+From the kubefleet-cookbook repo run,
+
 ```bash
-cd /path/to/approval-controller-metric-collector/approval-request-controller
+cd approval-controller-metric-collector/approval-request-controller
 
 # Switch to hub cluster
 kubectl config use-context kind-hub
