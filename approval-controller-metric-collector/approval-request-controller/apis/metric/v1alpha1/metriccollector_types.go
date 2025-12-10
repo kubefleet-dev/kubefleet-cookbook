@@ -64,7 +64,7 @@ type MetricCollectorSpec struct {
 	ReportNamespace string `json:"reportNamespace"`
 }
 
-// MetricsEndpointSpec defines how to access the metrics endpoint.ctor.
+// MetricCollectorStatus defines the observed state of MetricCollector.
 type MetricCollectorStatus struct {
 	// Conditions is an array of current observed conditions.
 	// +optional

@@ -32,7 +32,7 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
 3. **ClusterStagedWorkloadTracker** (cluster-scoped)
    - Defines which workloads to monitor for a ClusterStagedUpdateRun
    - The name must match the ClusterStagedUpdateRun name
-   - Specifies namespace, workload name, and expected health status
+   - Specifies workload's name, namespace and expected health status
    - Used by approval-request-controller to determine if stage is ready for approval
 
 4. **StagedWorkloadTracker** (namespaced)
@@ -49,7 +49,7 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
    - The ApprovalRequest enters "Pending" state, waiting for approval
 
 2. **Metric Collector Deployment**
-   - Approval-request-controller watches the CAR
+   - Approval-request-controller watches the `ClusterApprovalRequest`, `ApprovalRequest` objects
    - Creates a `MetricCollector` resource on the hub (cluster-scoped)
    - Creates a `ClusterResourceOverride` with per-cluster customization rules
      - Each cluster gets a unique `reportNamespace`: `fleet-member-<cluster-name>`
@@ -127,6 +127,8 @@ cd approval-controller-metric-collector/approval-request-controller
 kubectl config use-context kind-hub
 
 # Register member clusters with the hub
+# This creates MemberCluster resources for kind-cluster-1, kind-cluster-2, and kind-cluster-3
+# Each MemberCluster resource contains the API endpoint and credentials for the member cluster
 kubectl apply -f ./examples/membercluster/
 
 # Verify clusters are registered
@@ -151,7 +153,12 @@ Create the prometheus namespace and deploy Prometheus for metrics collection:
 # Create prometheus namespace
 kubectl create ns prometheus
 
-# Deploy Prometheus (ConfigMap, Deployment, Service, RBAC)
+# Deploy Prometheus (ConfigMap, Deployment, Service, RBAC, and CRP)
+# - ConfigMap: Contains Prometheus scrape configuration
+# - Deployment: Runs Prometheus server
+# - Service: Exposes Prometheus on port 9090
+# - RBAC: ServiceAccount, ClusterRole, and ClusterRoleBinding for pod discovery
+# - CRP: ClusterResourcePlacement to propagate Prometheus to all member clusters
 kubectl apply -f ./examples/prometheus/
 ```
 
@@ -165,7 +172,9 @@ Create the test namespace and deploy the sample application:
 # Create test namespace
 kubectl create ns test-ns
 
-# Deploy sample metric app (this will be propagated to member clusters)
+# Deploy sample metric app
+# This creates a Deployment with a simple Go app that exposes a /metrics endpoint
+# The app reports workload_health=1.0 (healthy) by default
 kubectl apply -f ./examples/sample-metric-app/
 ```
 
@@ -193,7 +202,9 @@ Apply the appropriate workload tracker based on which type of staged update you'
 
 ```bash
 # Apply ClusterStagedWorkloadTracker
-# Important: The name must match your ClusterStagedUpdateRun name
+# This defines which workloads to monitor for the staged rollout
+# The name "example-cluster-staged-run" must match the ClusterStagedUpdateRun name
+# Tracks: sample-metric-app in test-ns namespace
 kubectl apply -f ./examples/workloadtracker/clusterstagedworkloadtracker.yaml
 ```
 
@@ -201,7 +212,9 @@ kubectl apply -f ./examples/workloadtracker/clusterstagedworkloadtracker.yaml
 
 ```bash
 # Apply StagedWorkloadTracker
-# Important: The name and namespace must match your StagedUpdateRun name and namespace
+# This defines which workloads to monitor for the namespace-scoped staged rollout
+# The name "example-staged-run" and namespace "test-ns" must match the StagedUpdateRun
+# Tracks: sample-metric-app in test-ns namespace
 kubectl apply -f ./examples/workloadtracker/stagedworkloadtracker.yaml
 ```
 
@@ -243,9 +256,13 @@ cd ../approval-request-controller
 kubectl config use-context kind-hub
 
 # Apply ClusterStagedUpdateStrategy
+# Defines the stages for the rollout: staging (cluster-1) -> prod (cluster-2, cluster-3)
+# Each stage requires approval before proceeding
 kubectl apply -f ./examples/updateRun/example-csus.yaml
 
-# Apply ClusterResourcePlacement
+# Apply ClusterResourcePlacement for sample-metric-app
+# This is the resource that will be updated across stages
+# Selects the sample-metric-app deployment in test-ns namespace
 kubectl apply -f ./examples/updateRun/example-crp.yaml
 
 # Verify CRP is created
@@ -261,6 +278,9 @@ prometheus-crp    1     True        1               True        1               
 
 ```bash
 # Apply ClusterStagedUpdateRun to start the staged rollout
+# This creates the actual update run that progresses through the defined stages
+# Name: example-cluster-staged-run (must match ClusterStagedWorkloadTracker)
+# References the ClusterResourcePlacement (example-crp) and ClusterStagedUpdateStrategy
 kubectl apply -f ./examples/updateRun/example-csur.yaml
 
 # Check the staged update run status
@@ -286,6 +306,9 @@ kubectl config use-context kind-hub
 
 ``` bash
 # Apply namespace-scoped ClusterResourcePlacement
+# This CRP is configured to only place resources in the test-ns namespace
+# This resource is needed because we cannot propagate Namespace which is a 
+# cluster-scoped resource via RP
 kubectl apply -f ./examples/updateRun/example-ns-only-crp.yaml
 
 kubectl get crp -A
@@ -295,15 +318,18 @@ Output:
 ```bash
 NAME              GEN   SCHEDULED   SCHEDULED-GEN   AVAILABLE   AVAILABLE-GEN   AGE
 ns-only-crp       1     True        1               True        1               5s
-proemetheus-crp   1     True        1               True        1               2m34s
+prometheus-crp   1     True        1               True        1               2m34s
 ```
 
 ```bash
-# Apply StagedUpdateStrategy
+# Apply StagedUpdateStrategy (namespace-scoped)
+# Defines the stages: staging (cluster-1) -> prod (cluster-2, cluster-3)
+# Each stage requires approval before proceeding
 kubectl apply -f ./examples/updateRun/example-sus.yaml
 
-```bash
-# Apply ResourcePlacement
+# Apply ResourcePlacement (namespace-scoped)
+# This is the namespace-scoped version that works with the test-ns namespace
+# References the ns-only-crp ClusterResourcePlacement
 kubectl apply -f ./examples/updateRun/example-rp.yaml
 
 # Verify RP is created
@@ -317,7 +343,11 @@ test-ns     example-rp   1     True        1                                    
 ```
 
 ```bash
-# Apply StagedUpdateRun to start the staged rollout
+# Apply StagedUpdateRun to start the staged rollout (namespace-scoped)
+# This creates the actual update run that progresses through the defined stages
+# Name: example-staged-run (must match StagedWorkloadTracker)
+# Namespace: test-ns (must match StagedWorkloadTracker namespace)
+# References the ResourcePlacement (example-rp)
 kubectl apply -f ./examples/updateRun/example-sur.yaml
 
 # Check the staged update run status
@@ -389,13 +419,6 @@ fleet-member-kind-cluster-1   mc-example-staged-run-staging   1           27s   
 ```
 
 The approval controller will automatically approve stages when the metric collectors report that workloads are healthy.
-1. Builds the `metric-collector:latest` image
-2. Builds the `metric-app:local` image
-3. Loads both images into each kind cluster
-4. Creates hub token secret with proper RBAC
-5. Installs the metric-collector via Helm
-
-The `metric-app:local` image is pre-loaded so it's available when you propagate the sample-metric-app deployment from hub to member clusters.
 
 ## Verification
 

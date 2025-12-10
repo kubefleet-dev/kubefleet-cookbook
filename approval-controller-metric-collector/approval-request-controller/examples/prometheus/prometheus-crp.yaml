@@ -1,7 +1,7 @@
 apiVersion: placement.kubernetes-fleet.io/v1beta1
 kind: ClusterResourcePlacement
 metadata:
-  name: proemetheus-crp
+  name: prometheus-crp
 spec:
   resourceSelectors:
     - group: ""

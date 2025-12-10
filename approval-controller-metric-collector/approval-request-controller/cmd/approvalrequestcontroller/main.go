@@ -53,11 +53,9 @@ func init() {
 func main() {
 	var metricsAddr string
 	var probeAddr string
-	var logLevel int
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.IntVar(&logLevel, "v", 2, "Log level (0-10)")
 
 	opts := zap.Options{
 		Development: true,
@@ -67,7 +65,7 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	klog.InfoS("Starting ApprovalRequest Controller", "logLevel", logLevel)
+	klog.InfoS("Starting ApprovalRequest Controller")
 
 	config := ctrl.GetConfigOrDie()
 

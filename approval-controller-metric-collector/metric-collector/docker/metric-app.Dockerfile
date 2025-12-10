@@ -8,7 +8,7 @@ RUN go mod init metric-app && \
     go get github.com/prometheus/client_golang/prometheus/promhttp@latest
 
 # Copy source code
-COPY metric-collector/cmd/metriccollector/metric-app/ ./
+COPY metric-collector/cmd/metric-app/ ./
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o metric-app main.go
