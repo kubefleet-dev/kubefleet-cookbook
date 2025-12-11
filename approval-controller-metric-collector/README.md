@@ -218,7 +218,7 @@ With this understanding, you're ready to start the setup!
 
 ### 1. Setup KubeFleet Clusters
 
-First, set up the KubeFleet hub and member clusters:
+First, set up the KubeFleet hub and member clusters using kind (Kubernetes in Docker):
 
 ```bash
 cd /path/to/kubefleet
@@ -228,14 +228,16 @@ git checkout main
 git fetch upstream
 git rebase -i upstream/main
 
-# Set up clusters (creates 1 hub + 3 member clusters)
+# Set up clusters (creates 1 hub + 3 member kind clusters)
 export MEMBER_CLUSTER_COUNT=3
 make setup-clusters
 ```
 
-This will create:
+This will create local kind clusters for development and testing:
 - 1 hub cluster (context: `kind-hub`)
 - 3 member clusters (contexts: `kind-cluster-1`, `kind-cluster-2`, `kind-cluster-3`)
+
+**Note:** This tutorial uses kind clusters for easy local development. For production deployments, you would use real Kubernetes clusters (AKS, EKS, GKE, etc.) and adapt the installation scripts accordingly.
 
 ### 2. Register Member Clusters with Hub
 
