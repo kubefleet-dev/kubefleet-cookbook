@@ -35,7 +35,6 @@ spec:
         command:
           - /approval-request-controller
         args:
-          - --v={{ .Values.controller.logLevel }}
           - --metrics-bind-address=:{{ .Values.metrics.port }}
           - --health-probe-bind-address=:{{ .Values.healthProbe.port }}
         

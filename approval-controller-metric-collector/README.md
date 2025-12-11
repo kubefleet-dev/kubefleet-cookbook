@@ -86,10 +86,122 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
 
 ## Prerequisites
 
-- Docker or Podman for building images
+- Docker for building images
+- Azure CLI (`az`) for ACR operations
 - kubectl configured with access to your clusters
 - Helm 3.x
 - KubeFleet installed on hub and member clusters
+- Azure Container Registry (ACR) with anonymous pull enabled
+
+## Building and Pushing Images to ACR
+
+Before installing the controllers, you need to build the Docker images and push them to Azure Container Registry (ACR).
+
+**Critical Note:** Enable anonymous pull on the ACR so that clusters can pull images without authentication. Ensure to disable anonymous pull or delete the ACR after testing.
+
+### 1. Create ACR with Anonymous Pull
+
+Create a resource group and ACR with Standard SKU (Basic SKU doesn't support anonymous pull):
+
+```bash
+# Create resource group
+az group create --name test-kubefleet-rg --location eastus
+
+# Create container registry with Standard SKU
+az acr create --resource-group test-kubefleet-rg --name myfleetacr --sku Standard
+
+# Login to ACR
+az acr login --name myfleetacr
+
+# Enable anonymous pull
+az acr update --name myfleetacr --anonymous-pull-enabled
+```
+
+From the `az acr create` output, note down the login server (e.g., `myfleetacr.azurecr.io`).
+
+### 2. Build and Push Images
+
+Export registry and tag variables:
+
+```bash
+export REGISTRY="myfleetacr.azurecr.io"
+export TAG="latest"
+
+cd approval-controller-metric-collector
+```
+
+Build and push the approval-request-controller image:
+
+```bash
+docker buildx build \
+  --file approval-request-controller/docker/approval-request-controller.Dockerfile \
+  --tag ${REGISTRY}/approval-request-controller:${TAG} \
+  --platform=linux/amd64 \
+  --push \
+  .
+```
+
+Build and push the metric-collector image:
+
+```bash
+docker buildx build \
+  --file metric-collector/docker/metric-collector.Dockerfile \
+  --tag ${REGISTRY}/metric-collector:${TAG} \
+  --platform=linux/amd64 \
+  --push \
+  .
+```
+
+Build and push the metric-app image:
+
+```bash
+docker buildx build \
+  --file metric-collector/docker/metric-app.Dockerfile \
+  --tag ${REGISTRY}/metric-app:${TAG} \
+  --platform=linux/amd64 \
+  --push \
+  .
+```
+
+### 3. Verify Images in ACR
+
+List images in your ACR:
+
+```bash
+az acr repository list --name myfleetacr --output table
+```
+
+Expected output:
+```
+Result
+---------------------------
+approval-request-controller
+metric-app
+metric-collector
+```
+
+Verify tags for a specific image:
+
+```bash
+az acr repository show-tags --name myfleetacr --repository approval-request-controller --output table
+```
+
+Expected output:
+```
+Result
+--------
+latest
+```
+
+**You're now ready to proceed with the setup!** Your ACR contains all three required images that will be pulled by both kind and production clusters.
+
+### 4. Cleanup (After Testing)
+
+When you're done testing, delete the resource group to clean up all resources:
+
+```bash
+az group delete --name test-kubefleet-rg
+```
 
 ## Setup Overview
 
@@ -199,15 +311,15 @@ When you create a **ClusterStagedUpdateRun** or **StagedUpdateRun**, here's what
 ### What the Installation Scripts Do
 
 **`install-on-hub.sh`** (Approval Request Controller):
-- Builds controller Docker image with multi-arch support
-- Loads image into kind hub cluster
+- Takes ACR registry URL and hub cluster name as parameters
+- Pulls approval-request-controller image from ACR
 - Verifies KubeFleet CRDs are installed
 - Installs controller via Helm with custom CRDs (MetricCollector, MetricCollectorReport, WorkloadTracker)
 - Sets up RBAC for managing placements, overrides, and approval requests
 
 **`install-on-member.sh`** (Metric Collector):
-- Builds metric-collector and metric-app Docker images
-- Loads both images into each kind member cluster
+- Takes ACR registry URL, hub cluster, and member cluster names as parameters
+- Pulls metric-collector and metric-app images from ACR
 - Creates service account with hub cluster access token
 - Installs metric-collector via Helm on each member cluster
 - Configures connection to hub API server and local Prometheus
@@ -216,72 +328,62 @@ With this understanding, you're ready to start the setup!
 
 ## Setup
 
-### 1. Setup KubeFleet Clusters
+### Prerequisites
 
-First, set up the KubeFleet hub and member clusters using kind (Kubernetes in Docker):
+Before starting this tutorial, ensure you have:
+- A KubeFleet hub cluster with fleet controllers installed
+- Three member clusters joined to the hub cluster
+- kubectl configured with access to the hub cluster context
+
+### 1. Label Member Clusters for Staged Rollout
+
+The staged rollout uses labels to determine which clusters belong to each stage. Label your three member clusters appropriately:
 
 ```bash
-cd /path/to/kubefleet
+# Switch to hub cluster context
+kubectl config use-context <hub-context>
 
-# Checkout main branch
-git checkout main
-git fetch upstream
-git rebase -i upstream/main
+# Label the first cluster for staging (Stage 1)
+# Replace <cluster-1-name> with your actual cluster name (e.g., kind-cluster-1, aks-cluster-1, etc.)
+kubectl label membercluster <cluster-1-name> environment=staging --overwrite
+kubectl label membercluster <cluster-1-name> kubernetes-fleet.io/cluster-name=<cluster-1-name> --overwrite
 
-# Set up clusters (creates 1 hub + 3 member kind clusters)
-export MEMBER_CLUSTER_COUNT=3
-make setup-clusters
+# Label the second cluster for production (Stage 2)
+# Replace <cluster-2-name> with your actual cluster name
+kubectl label membercluster <cluster-2-name> environment=prod --overwrite
+kubectl label membercluster <cluster-2-name> kubernetes-fleet.io/cluster-name=<cluster-2-name> --overwrite
+
+# Label the third cluster for production (Stage 2)
+# Replace <cluster-3-name> with your actual cluster name
+kubectl label membercluster <cluster-3-name> environment=prod --overwrite
+kubectl label membercluster <cluster-3-name> kubernetes-fleet.io/cluster-name=<cluster-3-name> --overwrite
+
+# Verify the labels are applied
+kubectl get membercluster --show-labels
 ```
 
-This will create local kind clusters for development and testing:
-- 1 hub cluster (context: `kind-hub`)
-- 3 member clusters (contexts: `kind-cluster-1`, `kind-cluster-2`, `kind-cluster-3`)
+Expected output:
+```bash
+NAME          JOINED   AGE   LABELS
+cluster-1     True     5m    environment=staging,kubernetes-fleet.io/cluster-name=cluster-1,...
+cluster-2     True     5m    environment=prod,kubernetes-fleet.io/cluster-name=cluster-2,...
+cluster-3     True     5m    environment=prod,kubernetes-fleet.io/cluster-name=cluster-3,...
+```
 
-**Note:** This tutorial uses kind clusters for easy local development. For production deployments, you would use real Kubernetes clusters (AKS, EKS, GKE, etc.) and adapt the installation scripts accordingly.
+These labels are used by the `StagedUpdateStrategy` to select clusters for each stage:
+- **Stage 1 (staging)**: Selects clusters with `environment=staging` → cluster-1
+- **Stage 2 (prod)**: Selects clusters with `environment=prod` → cluster-2 and cluster-3
 
-### 2. Register Member Clusters with Hub
+### 2. Deploy Prometheus
 
-Switch to hub cluster context and register the member clusters:
-
-From the kubefleet-cookbook repo run,
+From the kubefleet-cookbook repo, navigate to the approval-request-controller directory and deploy Prometheus for metrics collection:
 
 ```bash
 cd approval-controller-metric-collector/approval-request-controller
 
-# Switch to hub cluster
-kubectl config use-context kind-hub
+# Switch to hub cluster context
+kubectl config use-context <hub-context>
 
-# Register member clusters with the hub
-# This creates MemberCluster resources for kind-cluster-1, kind-cluster-2, and kind-cluster-3
-# Each MemberCluster resource contains:
-#   - API endpoint and credentials for the member cluster
-#   - Labels for organizing clusters into stages:
-#     * kind-cluster-1: environment=staging (Stage 1)
-#     * kind-cluster-2: environment=prod (Stage 2)
-#     * kind-cluster-3: environment=prod (Stage 2)
-# These labels are used by the StagedUpdateStrategy's labelSelector to determine
-# which clusters are part of each stage during the UpdateRun
-kubectl apply -f ./examples/membercluster/
-
-# Verify clusters are registered
-kubectl get cluster -A
-```
-
-the output should look something like this,
-
-```bash
-NAME             JOINED   AGE   MEMBER-AGENT-LAST-SEEN   NODE-COUNT   AVAILABLE-CPU   AVAILABLE-MEMORY
-kind-cluster-1   True     40s   29s                      0            0               0
-kind-cluster-2   True     40s   3s                       0            0               0
-kind-cluster-3   True     40s   37s                      0            0               0
-```
-Wait until all member clusters show as joined.
-
-### 3. Deploy Prometheus
-
-Create the prometheus namespace and deploy Prometheus for metrics collection:
-
-```bash
 # Create prometheus namespace
 kubectl create ns prometheus
 
@@ -296,7 +398,7 @@ kubectl apply -f ./examples/prometheus/
 
 This deploys Prometheus configured to scrape pods from all namespaces with the proper annotations.
 
-### 4. Deploy Sample Metric Application
+### 3. Deploy Sample Metric Application
 
 Create the test namespace and deploy the sample application:
 
@@ -307,26 +409,45 @@ kubectl create ns test-ns
 # Deploy sample metric app
 # This creates a Deployment with a simple Go app that exposes a /metrics endpoint
 # The app reports workload_health=1.0 (healthy) by default
-kubectl apply -f ./examples/sample-metric-app/
+# Note: Update the image reference in the YAML to use your ACR registry
+# Change "image: metric-app:local" to "image: ${REGISTRY}/metric-app:latest"
+# You can use sed to update it:
+sed "s|image: metric-app:local|image: ${REGISTRY}/metric-app:latest|" \
+  ./examples/sample-metric-app/sample-metric-app.yaml | kubectl apply -f -
 ```
 
-### 5. Install Approval Request Controller (Hub Cluster)
+**Alternative:** Manually edit `./examples/sample-metric-app/sample-metric-app.yaml` to change:
+```yaml
+image: metric-app:local
+imagePullPolicy: IfNotPresent
+```
+to:
+```yaml
+image: myfleetacr.azurecr.io/metric-app:latest
+imagePullPolicy: Always
+```
+Then apply: `kubectl apply -f ./examples/sample-metric-app/`
+```
 
-Install the approval request controller on the hub cluster:
+### 4. Install Approval Request Controller (Hub Cluster)
+
+Install the approval request controller on the hub cluster using the ACR registry:
 
 ```bash
+# Set your ACR registry name
+export REGISTRY="myfleetacr.azurecr.io"
+
 # Run the installation script
-./install-on-hub.sh
+./install-on-hub.sh ${REGISTRY} <HUB_CONTEXT>
 ```
 
 The script performs the following:
-1. Builds the `approval-request-controller:latest` image
-2. Loads the image into the kind hub cluster
-3. Verifies that required kubefleet CRDs are installed
-4. Installs the controller via Helm with the custom CRDs (MetricCollector, MetricCollectorReport, ClusterStagedWorkloadTracker, StagedWorkloadTracker)
-5. Verifies the installation
+1. Pulls the `approval-request-controller` image from your ACR
+2. Verifies that required kubefleet CRDs are installed
+3. Installs the controller via Helm with the custom CRDs (MetricCollector, MetricCollectorReport, ClusterStagedWorkloadTracker, StagedWorkloadTracker)
+4. Verifies the installation
 
-### 6. Configure Workload Tracker
+### 5. Configure Workload Tracker
 
 Apply the appropriate workload tracker based on which type of staged update you'll use:
 
@@ -349,44 +470,43 @@ kubectl apply -f ./examples/workloadtracker/clusterstagedworkloadtracker.yaml
 # Tracks: sample-metric-app in test-ns namespace
 kubectl apply -f ./examples/workloadtracker/stagedworkloadtracker.yaml
 ```
-
-This tells the approval controller which workloads to track.
-
-### 7. Install Metric Collector (Member Clusters)
-
-Install the metric collector on all member clusters:
+Install the metric collector on all member clusters using the ACR registry:
 
 ```bash
 cd ../metric-collector
 
 # Run the installation script for all member clusters
-# This builds both metric-collector and metric-app images and loads them into each cluster
-./install-on-member.sh 3
+# Replace <hub-cluster-name> with your hub cluster name (e.g., kind-hub, hub)
+# Replace <cluster-1-name>, <cluster-2-name>, <cluster-3-name> with your actual cluster names
+./install-on-member.sh ${REGISTRY} <hub-cluster-name> <cluster-1-name> <cluster-2-name> <cluster-3-name>
+The script performs the following for each member cluster:
+1. Verifies the `fleet-member-<cluster-name>` namespace exists on the hub (created by KubeFleet)
+2. Creates RBAC resources (ServiceAccount, Role, RoleBinding) in the fleet-member namespace on the hub
+3. Creates a token secret for hub cluster authentication
+4. Installs the metric-collector via Helm on each member cluster
+5. Configures the collector to pull images from ACR and connect to hub API server and local Prometheus
+
+**Note:** The script expects the `fleet-member-<cluster-name>` namespaces to already exist on the hub cluster. These are automatically created by KubeFleet when member clusters join the hub. If you encounter errors about missing namespaces, ensure your member clusters are properly registered with the hub.
+./install-on-member.sh ${REGISTRY} kind-hub kind-cluster-1 kind-cluster-2 kind-cluster-3
 ```
 
 The script performs the following for each member cluster:
-1. Builds the `metric-collector:latest` image
-2. Builds the `metric-app:local` image
-3. Loads both images into each kind cluster
-4. Creates hub token secret with proper RBAC
-5. Installs the metric-collector via Helm
+1. Pulls the `metric-collector` and `metric-app` images from your ACR
+2. Creates hub token secret with proper RBAC
+3. Installs the metric-collector via Helm
+4. Configures connection to hub API server and local Prometheus
+```bash
+cd ../approval-request-controller
 
-The `metric-app:local` image is loaded so it's available when you propagate the sample-metric-app deployment from hub to member clusters.
+# Switch to hub cluster context
+kubectl config use-context <hub-context>
 
-### 8. Create Staged Update
-
-You can create staged updates using either cluster-scoped or namespace-scoped resources:
-
+# Apply ClusterStagedUpdateStrategy
 #### Option A: Cluster-Scoped Staged Update (ClusterStagedUpdateRun)
 
 Switch back to hub cluster and create a cluster-scoped staged update run:
 
 ```bash
-cd ../approval-request-controller
-
-# Switch to hub cluster
-kubectl config use-context kind-hub
-
 # Apply ClusterStagedUpdateStrategy
 # Defines the stages for the rollout: staging (cluster-1) -> prod (cluster-2, cluster-3)
 # Each stage requires approval before proceeding
@@ -418,11 +538,11 @@ kubectl apply -f ./examples/updateRun/example-csur.yaml
 # Check the staged update run status
 kubectl get csur -A
 ```
-
-Output:
 ```bash
-NAME                         PLACEMENT     RESOURCE-SNAPSHOT-INDEX   POLICY-SNAPSHOT-INDEX   INITIALIZED   PROGRESSING   SUCCEEDED   AGE
-example-cluster-staged-run   example-crp   0                         0                       True          True                      5s
+cd ../approval-request-controller
+
+# Switch to hub cluster context
+kubectl config use-context <hub-context>
 ```
 
 #### Option B: Namespace-Scoped Staged Update (StagedUpdateRun)
@@ -492,7 +612,7 @@ NAMESPACE   NAME                 PLACEMENT    RESOURCE-SNAPSHOT-INDEX   POLICY-S
 test-ns     example-staged-run   example-rp   0                         0                       True          True                      5s
 ```
 
-### 9. Monitor the Staged Rollout
+### 8. Monitor the Staged Rollout
 
 Watch the staged update progress:
 

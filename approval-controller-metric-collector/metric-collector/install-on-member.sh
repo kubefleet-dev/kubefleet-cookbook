@@ -1,102 +1,127 @@
 #!/bin/bash
 set -e
 
+# Usage: ./install-on-member.sh <registry> <hub-cluster> <member-cluster-1> [member-cluster-2] [member-cluster-3] ...
+# Example: ./install-on-member.sh arvindtestacr.azurecr.io kind-hub kind-cluster-1 kind-cluster-2 kind-cluster-3
+
+if [ "$#" -lt 3 ]; then
+    echo "Usage: $0 <registry> <hub-cluster> <member-cluster-1> [member-cluster-2] ..."
+    echo "Example: $0 arvindtestacr.azurecr.io kind-hub kind-cluster-1 kind-cluster-2 kind-cluster-3"
+    echo ""
+    echo "Parameters:"
+    echo "  registry         - ACR registry URL (e.g., arvindtestacr.azurecr.io)"
+    echo "  hub-cluster      - Hub cluster name (e.g., kind-hub)"
+    echo "  member-clusters  - One or more member cluster names"
+    exit 1
+fi
+
 # Configuration
-HUB_CONTEXT="kind-hub"
-MEMBER_CLUSTER_COUNT="${1:-1}"  # Default to 1 if not specified
+REGISTRY="$1"
+HUB_CLUSTER="$2"
+MEMBER_CLUSTERS=("${@:3}")
 MEMBER_NAMESPACE="default"
 PROMETHEUS_URL="http://prometheus.test-ns:9090"
-IMAGE_NAME="metric-collector"
-IMAGE_TAG="latest"
-METRIC_APP_IMAGE_NAME="metric-app"
-METRIC_APP_IMAGE_TAG="local"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+METRIC_COLLECTOR_IMAGE="metric-collector"
+METRIC_APP_IMAGE="metric-app"
 
-# Get hub cluster API server URL dynamically using docker inspect (following kubefleet pattern)
-HUB_API_SERVER="https://$(docker inspect hub-control-plane --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'):6443"
+# Get hub cluster context and API server URL using kubectl config view (following kubefleet pattern)
+HUB_CONTEXT=$(kubectl config view -o jsonpath="{.contexts[?(@.context.cluster==\"$HUB_CLUSTER\")].name}")
+HUB_API_SERVER=$(kubectl config view -o jsonpath="{.clusters[?(@.name==\"$HUB_CLUSTER\")].cluster.server}")
 
-echo "=== Installing MetricCollector on ${MEMBER_CLUSTER_COUNT} member cluster(s) ==="
-echo "Hub cluster: ${HUB_CONTEXT}"
+if [ -z "$HUB_CONTEXT" ]; then
+    echo "Error: Could not find context for hub cluster '$HUB_CLUSTER'"
+    echo "Available clusters:"
+    kubectl config view -o jsonpath='{.clusters[*].name}' | tr ' ' '\n'
+    exit 1
+fi
+
+if [ -z "$HUB_API_SERVER" ]; then
+    echo "Error: Could not find API server URL for hub cluster '$HUB_CLUSTER'"
+    exit 1
+fi
+
+# Construct full image repository paths
+METRIC_COLLECTOR_REPOSITORY="${REGISTRY}/${METRIC_COLLECTOR_IMAGE}"
+METRIC_APP_REPOSITORY="${REGISTRY}/${METRIC_APP_IMAGE}"
+
+echo "=== Installing MetricCollector on ${#MEMBER_CLUSTERS[@]} member cluster(s) ==="
+echo "Registry: ${REGISTRY}"
+echo "Metric Collector Image: ${METRIC_COLLECTOR_REPOSITORY}:${IMAGE_TAG}"
+echo "Metric App Image: ${METRIC_APP_REPOSITORY}:${IMAGE_TAG}"
+echo "Hub cluster: ${HUB_CLUSTER}"
+echo "Hub context: ${HUB_CONTEXT}"
 echo "Hub API server: ${HUB_API_SERVER}"
+echo "Member clusters: ${MEMBER_CLUSTERS[@]}"
 echo ""
 
-# Step 0: Build and load Docker images (once for all clusters)
-echo "Step 0: Building Docker images..."
-
-# Build metric-collector image from parent directory (needs approval-request-controller)
-cd ..
-docker buildx build \
-  --file metric-collector/docker/metric-collector.Dockerfile \
-  --output=type=docker \
-  --platform=linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
-  --tag ${IMAGE_NAME}:${IMAGE_TAG} \
-  --build-arg GOARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
-  --build-arg GOOS=linux \
-  .
-echo "✓ Metric collector image built"
-
-# Build metric-app image (still in parent directory)
-docker buildx build \
-  --file metric-collector/docker/metric-app.Dockerfile \
-  --output=type=docker \
-  --platform=linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
-  --tag ${METRIC_APP_IMAGE_NAME}:${METRIC_APP_IMAGE_TAG} \
-  .
-echo "✓ Metric app image built"
-
-# Return to metric-collector directory
-cd metric-collector
 echo ""
 
 # Install on each member cluster
-for i in $(seq 1 ${MEMBER_CLUSTER_COUNT}); do
-  MEMBER_CONTEXT="kind-cluster-${i}"
-  MEMBER_CLUSTER_NAME="kind-cluster-${i}"
+CLUSTER_INDEX=0
+for MEMBER_CLUSTER in "${MEMBER_CLUSTERS[@]}"; do
+  CLUSTER_INDEX=$((CLUSTER_INDEX + 1))
+  
+  MEMBER_CONTEXT=$(kubectl config view -o jsonpath="{.contexts[?(@.context.cluster==\"$MEMBER_CLUSTER\")].name}")
+  MEMBER_CLUSTER_NAME="${MEMBER_CLUSTER}"
   HUB_NAMESPACE="fleet-member-${MEMBER_CLUSTER_NAME}"
 
+  if [ -z "$MEMBER_CONTEXT" ]; then
+      echo "Error: Could not find context for member cluster '$MEMBER_CLUSTER'"
+      echo "Available clusters:"
+      kubectl config view -o jsonpath='{.clusters[*].name}' | tr ' ' '\n'
+      exit 1
+  fi
+
   echo "========================================"
-  echo "Installing on Member Cluster ${i}/${MEMBER_CLUSTER_COUNT}"
+  echo "Installing on Member Cluster ${CLUSTER_INDEX}/${#MEMBER_CLUSTERS[@]}"
+  echo "  Cluster: ${MEMBER_CLUSTER}"
   echo "  Context: ${MEMBER_CONTEXT}"
   echo "  Cluster Name: ${MEMBER_CLUSTER_NAME}"
   echo "========================================"
   echo ""
 
-  # Load image into this member cluster
-  echo "Loading Docker images into ${MEMBER_CONTEXT}..."
-  kind load docker-image ${IMAGE_NAME}:${IMAGE_TAG} --name cluster-${i}
-  kind load docker-image ${METRIC_APP_IMAGE_NAME}:${METRIC_APP_IMAGE_TAG} --name cluster-${i}
-  echo "✓ Images loaded into kind cluster"
-  echo ""
-
   # Step 1: Setup RBAC on hub cluster
   echo "Step 1: Setting up RBAC on hub cluster..."
-  kubectl --context=${HUB_CONTEXT} create namespace ${HUB_NAMESPACE} --dry-run=client -o yaml | kubectl --context=${HUB_CONTEXT} apply -f -
-  kubectl --context=${HUB_CONTEXT} create serviceaccount metric-collector-sa -n ${HUB_NAMESPACE} --dry-run=client -o yaml | kubectl --context=${HUB_CONTEXT} apply -f -
+  
+  # Verify namespace exists (should be created by KubeFleet when member cluster joins)
+  if ! kubectl --context=${HUB_CONTEXT} get namespace ${HUB_NAMESPACE} &>/dev/null; then
+      echo "Error: Namespace ${HUB_NAMESPACE} does not exist on hub cluster"
+      echo "This namespace should be automatically created by KubeFleet when the member cluster joins the hub"
+      echo "Please ensure the member cluster is properly registered with the hub"
+      exit 1
+  fi
 
   cat <<EOF | kubectl --context=${HUB_CONTEXT} apply -f -
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+apiVersion: v1
+kind: ServiceAccount
 metadata:
-  name: metric-collector-hub-access
-rules:
-  - apiGroups: ["metric.kubernetes-fleet.io"]
-    resources: ["metriccollectorreports"]
-    verbs: ["get", "list", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["get", "list"]
+  name: metric-collector-sa
+  namespace: ${HUB_NAMESPACE}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: Role
 metadata:
-  name: metric-collector-${MEMBER_CLUSTER_NAME}
+  name: metric-collector-role
+  namespace: ${HUB_NAMESPACE}
+rules:
+- apiGroups: ["metric.kubernetes-fleet.io"]
+  resources: ["metriccollectorreports"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: metric-collector-rolebinding
+  namespace: ${HUB_NAMESPACE}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: metric-collector-hub-access
+  kind: Role
+  name: metric-collector-role
 subjects:
-  - kind: ServiceAccount
-    name: metric-collector-sa
-    namespace: ${HUB_NAMESPACE}
+- kind: ServiceAccount
+  name: metric-collector-sa
+  namespace: ${HUB_NAMESPACE}
 EOF
 
   echo "✓ RBAC configured on hub cluster"
@@ -149,9 +174,11 @@ EOF
     --set hubCluster.url=${HUB_API_SERVER} \
     --set hubCluster.tls.insecure=true \
     --set prometheus.url=${PROMETHEUS_URL} \
-    --set image.repository=${IMAGE_NAME} \
+    --set image.repository=${METRIC_COLLECTOR_REPOSITORY} \
     --set image.tag=${IMAGE_TAG} \
-    --set image.pullPolicy=IfNotPresent
+    --set image.pullPolicy=Always \
+    --set metricApp.image.repository=${METRIC_APP_REPOSITORY} \
+    --set metricApp.image.tag=${IMAGE_TAG}
 
   echo "✓ Helm chart installed on member cluster"
   echo ""
@@ -171,7 +198,7 @@ echo "=== All Installations Complete ==="
 echo "========================================"
 echo ""
 echo "To check logs from a specific member cluster:"
-echo "  kubectl --context=kind-cluster-1 logs -n ${MEMBER_NAMESPACE} -l app.kubernetes.io/name=metric-collector -f"
+echo "  kubectl --context=${MEMBER_CLUSTERS[0]} logs -n ${MEMBER_NAMESPACE} -l app.kubernetes.io/name=metric-collector -f"
 echo ""
 echo "To check MetricCollectorReports on hub:"
 echo "  kubectl --context=${HUB_CONTEXT} get metriccollectorreports -A"

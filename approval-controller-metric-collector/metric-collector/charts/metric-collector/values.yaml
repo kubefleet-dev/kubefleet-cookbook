@@ -8,6 +8,12 @@ image:
   pullPolicy: IfNotPresent
   tag: "latest"
 
+# Metric app image configuration (used in sample deployments)
+metricApp:
+  image:
+    repository: metric-app
+    tag: "latest"
+
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""

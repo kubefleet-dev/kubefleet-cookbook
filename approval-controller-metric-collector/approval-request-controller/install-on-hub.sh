@@ -1,31 +1,48 @@
 #!/bin/bash
 set -e
 
+# Usage: ./install-on-hub.sh <registry> <hub-cluster>
+# Example: ./install-on-hub.sh arvindtestacr.azurecr.io kind-hub
+
+if [ "$#" -lt 2 ]; then
+    echo "Usage: $0 <registry> <hub-cluster>"
+    echo "Example: $0 arvindtestacr.azurecr.io kind-hub"
+    echo ""
+    echo "Parameters:"
+    echo "  registry    - ACR registry URL (e.g., arvindtestacr.azurecr.io)"
+    echo "  hub-cluster - Hub cluster name (e.g., kind-hub)"
+    exit 1
+fi
+
 # Configuration
-HUB_CONTEXT="kind-hub"
+REGISTRY="$1"
+HUB_CLUSTER="$2"
 IMAGE_NAME="approval-request-controller"
-IMAGE_TAG="latest"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
 NAMESPACE="fleet-system"
 CHART_NAME="approval-request-controller"
 
+# Get hub cluster context using kubectl config view (following kubefleet pattern)
+HUB_CONTEXT=$(kubectl config view -o jsonpath="{.contexts[?(@.context.cluster==\"$HUB_CLUSTER\")].name}")
+
+if [ -z "$HUB_CONTEXT" ]; then
+    echo "Error: Could not find context for hub cluster '$HUB_CLUSTER'"
+    echo "Available clusters:"
+    kubectl config view -o jsonpath='{.clusters[*].name}' | tr ' ' '\n'
+    exit 1
+fi
+
+# Construct full image repository path
+IMAGE_REPOSITORY="${REGISTRY}/${IMAGE_NAME}"
+
 echo "=== Installing ApprovalRequest Controller on hub cluster ==="
-echo "Hub cluster: ${HUB_CONTEXT}"
+echo "Registry: ${REGISTRY}"
+echo "Image: ${IMAGE_REPOSITORY}:${IMAGE_TAG}"
+echo "Hub cluster: ${HUB_CLUSTER}"
+echo "Hub context: ${HUB_CONTEXT}"
 echo "Namespace: ${NAMESPACE}"
 echo ""
 
-# Step 0: Build and load Docker image
-echo "Step 0: Building and loading Docker image..."
-cd ..
-docker buildx build \
-  --file approval-request-controller/docker/approval-request-controller.Dockerfile \
-  --output=type=docker \
-  --platform=linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
-  --tag ${IMAGE_NAME}:${IMAGE_TAG} \
-  --build-arg GOARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
-  .
-cd approval-request-controller
-kind load docker-image ${IMAGE_NAME}:${IMAGE_TAG} --name hub
-echo "✓ Docker image built and loaded into kind cluster"
 echo ""
 
 # Step 1: Verify kubefleet CRDs are installed
@@ -65,9 +82,9 @@ helm upgrade --install ${CHART_NAME} ./charts/${CHART_NAME} \
   --kube-context=${HUB_CONTEXT} \
   --namespace ${NAMESPACE} \
   --create-namespace \
-  --set image.repository=${IMAGE_NAME} \
+  --set image.repository=${IMAGE_REPOSITORY} \
   --set image.tag=${IMAGE_TAG} \
-  --set image.pullPolicy=IfNotPresent \
+  --set image.pullPolicy=Always \
   --set controller.logLevel=2
 
 echo "✓ Helm chart installed on hub cluster"
@@ -89,7 +106,7 @@ echo "To check controller logs:"
 echo "  kubectl --context=${HUB_CONTEXT} logs -n ${NAMESPACE} -l app.kubernetes.io/name=${CHART_NAME} -f"
 echo ""
 echo "To verify CRDs:"
-echo "  kubectl --context=${HUB_CONTEXT} get crd | grep placement.kubernetes-fleet.io"
+echo "  kubectl --context=${HUB_CONTEXT} get crd | grep metric.kubernetes-fleet.io"
 echo ""
 echo "Next steps:"
 echo "  1. Create a WorkloadTracker to define which workloads to monitor"
