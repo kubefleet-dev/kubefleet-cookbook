@@ -91,6 +91,129 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
 - Helm 3.x
 - KubeFleet installed on hub and member clusters
 
+## Setup Overview
+
+Before diving into the setup steps, here's a bird's eye view of what you'll be building:
+
+### Architecture Components
+
+**Hub Cluster** - The control plane where you'll deploy:
+1. **3 Member Clusters** (kind-cluster-1, kind-cluster-2, kind-cluster-3)
+   - Labeled with `environment=staging` or `environment=prod`
+   - These labels determine which stage each cluster belongs to during rollouts
+
+2. **Prometheus** (propagated to all clusters)
+   - Monitors workload health via `/metrics` endpoints
+   - Scrapes pods with `prometheus.io/scrape: "true"` annotation
+   - Provides `workload_health` metric (1.0 = healthy, 0.0 = unhealthy)
+
+3. **Approval Request Controller**
+   - Watches `ClusterApprovalRequest` and `ApprovalRequest` objects
+   - Deploys MetricCollector to stage clusters via ClusterResourcePlacement
+   - Evaluates workload health from MetricCollectorReports
+   - Auto-approves stages when all workloads are healthy
+
+4. **Sample Metric App** (will be rolled out to clusters)
+   - Simple Go application exposing `/metrics` endpoint
+   - Reports `workload_health=1.0` by default
+   - Used to demonstrate health-based approvals
+
+**Member Clusters** - Where workloads run:
+1. **Metric Collector**
+   - Queries local Prometheus every 30 seconds
+   - Reports workload health back to hub cluster
+   - Creates/updates MetricCollectorReport in hub's `fleet-member-<cluster-name>` namespace
+
+2. **Prometheus** (received from hub)
+   - Runs on each member cluster
+   - Scrapes local workload metrics
+
+3. **Sample Metric App** (received from hub)
+   - Deployed via staged rollout
+   - Monitored for health during updates
+
+### WorkloadTracker - The Decision Maker
+
+The **WorkloadTracker** is a critical resource that tells the approval controller which workloads must be healthy before approving a stage. Without it, the controller doesn't know what to monitor.
+
+**Two Types:**
+
+1. **ClusterStagedWorkloadTracker** (for ClusterStagedUpdateRun)
+   - Cluster-scoped resource on the hub
+   - Name must exactly match the ClusterStagedUpdateRun name
+   - Example: If your UpdateRun is named `example-cluster-staged-run`, the tracker must also be named `example-cluster-staged-run`
+   - Contains a list of workloads (name + namespace) to monitor across all clusters in each stage
+
+2. **StagedWorkloadTracker** (for StagedUpdateRun)
+   - Namespace-scoped resource on the hub
+   - Name and namespace must exactly match the StagedUpdateRun
+   - Example: If your UpdateRun is `example-staged-run` in namespace `test-ns`, the tracker must be `example-staged-run` in `test-ns`
+   - Contains a list of workloads to monitor
+
+**How It Works:**
+```yaml
+# ClusterStagedWorkloadTracker example
+workloads:
+  - name: sample-metric-app    # Deployment name
+    namespace: test-ns         # Namespace where it runs
+```
+
+When the approval controller evaluates a stage:
+1. It fetches the WorkloadTracker that matches the UpdateRun name (and namespace)
+2. For each cluster in the stage, it reads the MetricCollectorReport
+3. It verifies that every workload listed in the tracker appears in the report with `health=1.0`
+4. Only when ALL workloads in ALL clusters are healthy does it approve the stage
+
+**Critical Rule:** The WorkloadTracker must be created BEFORE starting the UpdateRun. If the controller can't find a matching tracker, it won't approve any stages.
+
+### The Staged Rollout Flow
+
+When you create a **ClusterStagedUpdateRun** or **StagedUpdateRun**, here's what happens:
+
+1. **Stage 1 (staging)**: Rollout starts with `kind-cluster-1`
+   - KubeFleet creates an ApprovalRequest for the staging stage
+   - Approval controller deploys MetricCollector to `kind-cluster-1`
+   - Metric collector reports health metrics back to hub
+   - When `sample-metric-app` is healthy, approval controller auto-approves
+   - KubeFleet proceeds with the rollout to `kind-cluster-1`
+
+2. **Stage 2 (prod)**: After staging succeeds
+   - KubeFleet creates an ApprovalRequest for the prod stage
+   - Approval controller deploys MetricCollector to `kind-cluster-2` and `kind-cluster-3`
+   - Metric collectors report health from both clusters
+   - When ALL workloads across BOTH prod clusters are healthy, auto-approve
+   - KubeFleet completes the rollout to production clusters
+
+### Key Resources You'll Create
+
+| Resource | Purpose | Where |
+|----------|---------|-------|
+| **MemberCluster** | Register member clusters with hub, apply stage labels | Hub |
+| **ClusterResourcePlacement** | Define what resources to propagate (Prometheus, sample-app) | Hub |
+| **StagedUpdateStrategy** | Define stages with label selectors and approval requirements | Hub |
+| **WorkloadTracker** | Specify which workloads to monitor for health | Hub |
+| **UpdateRun** | Start the staged rollout process | Hub |
+| **MetricCollector** | Automatically created by approval controller per stage | Hub → Member |
+| **MetricCollectorReport** | Automatically created by metric collector | Member → Hub |
+
+### What the Installation Scripts Do
+
+**`install-on-hub.sh`** (Approval Request Controller):
+- Builds controller Docker image with multi-arch support
+- Loads image into kind hub cluster
+- Verifies KubeFleet CRDs are installed
+- Installs controller via Helm with custom CRDs (MetricCollector, MetricCollectorReport, WorkloadTracker)
+- Sets up RBAC for managing placements, overrides, and approval requests
+
+**`install-on-member.sh`** (Metric Collector):
+- Builds metric-collector and metric-app Docker images
+- Loads both images into each kind member cluster
+- Creates service account with hub cluster access token
+- Installs metric-collector via Helm on each member cluster
+- Configures connection to hub API server and local Prometheus
+
+With this understanding, you're ready to start the setup!
+
 ## Setup
 
 ### 1. Setup KubeFleet Clusters
@@ -128,7 +251,14 @@ kubectl config use-context kind-hub
 
 # Register member clusters with the hub
 # This creates MemberCluster resources for kind-cluster-1, kind-cluster-2, and kind-cluster-3
-# Each MemberCluster resource contains the API endpoint and credentials for the member cluster
+# Each MemberCluster resource contains:
+#   - API endpoint and credentials for the member cluster
+#   - Labels for organizing clusters into stages:
+#     * kind-cluster-1: environment=staging (Stage 1)
+#     * kind-cluster-2: environment=prod (Stage 2)
+#     * kind-cluster-3: environment=prod (Stage 2)
+# These labels are used by the StagedUpdateStrategy's labelSelector to determine
+# which clusters are part of each stage during the UpdateRun
 kubectl apply -f ./examples/membercluster/
 
 # Verify clusters are registered
