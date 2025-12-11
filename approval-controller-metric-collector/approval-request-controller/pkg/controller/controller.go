@@ -193,7 +193,7 @@ func (r *Reconciler) reconcileApprovalRequestObj(ctx context.Context, approvalRe
 	// Check workload health and approve if all workloads are healthy
 	if err := r.checkWorkloadHealthAndApprove(ctx, approvalReqObj, clusterNames, updateRunName, stageName); err != nil {
 		klog.ErrorS(err, "Failed to check workload health", "approvalRequest", approvalReqRef)
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, err
+		return ctrl.Result{}, err
 	}
 
 	// Requeue after 15 seconds to check again (will stop if approved in next reconciliation)
