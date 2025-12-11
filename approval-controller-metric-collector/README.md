@@ -8,7 +8,7 @@ This directory contains two controllers:
 - **approval-request-controller**: Runs on the hub cluster to automate approval decisions for staged updates
 - **metric-collector**: Runs on member clusters to collect workload health metrics from Prometheus
 
-![Approval Controller and Metric Collector Architecture](./approval-controller-metric-collector.png)
+![Approval Controller and Metric Collector Architecture](./images/approval-controller-metric-collector.png)
 
 ## How It Works
 
