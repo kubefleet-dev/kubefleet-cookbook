@@ -478,6 +478,7 @@ kubectl get metriccollectorreport -A
 - Ensure workloads have Prometheus scrape annotations
 
 ### Approvals not happening
+- Check the appropriate Workload tracker object exists
 - Check that the workload tracker name matches the update run name:
   - For ClusterStagedUpdateRun: ClusterStagedWorkloadTracker name must match
   - For StagedUpdateRun: StagedWorkloadTracker name and namespace must match
