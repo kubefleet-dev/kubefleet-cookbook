@@ -24,12 +24,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	localv1alpha1 "github.com/kubefleet-dev/kubefleet-cookbook/approval-controller-metric-collector/approval-request-controller/apis/metric/v1alpha1"
@@ -38,251 +36,137 @@ import (
 const (
 	// defaultCollectionInterval is the interval for collecting metrics (30 seconds)
 	defaultCollectionInterval = 30 * time.Second
-
-	// metricCollectorFinalizer is the finalizer for cleaning up MetricCollectorReport
-	metricCollectorFinalizer = "kubernetes-fleet.io/metric-collector-report-cleanup"
 )
 
-// Reconciler reconciles a MetricCollector object
+// Reconciler reconciles a MetricCollectorReport object on the hub cluster
 type Reconciler struct {
-	// MemberClient is the client to access the member cluster
-	MemberClient client.Client
-
-	// HubClient is the client to access the hub cluster
+	// HubClient is the client to access the hub cluster (for MetricCollectorReport and WorkloadTracker)
 	HubClient client.Client
-
-	// recorder is the event recorder
-	recorder record.EventRecorder
-
-	// PrometheusClient is the client to query Prometheus
-	PrometheusClient PrometheusClient
 }
 
-// Reconcile reconciles a MetricCollector object
+// Reconcile watches MetricCollectorReport on hub and updates it with metrics from member Prometheus
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	startTime := time.Now()
-	klog.V(2).InfoS("MetricCollector reconciliation starts", "metricCollector", req.Name)
+	klog.V(2).InfoS("MetricCollectorReport reconciliation starts", "report", req.NamespacedName)
 	defer func() {
 		latency := time.Since(startTime).Milliseconds()
-		klog.V(2).InfoS("MetricCollector reconciliation ends", "metricCollector", req.Name, "latency", latency)
+		klog.V(2).InfoS("MetricCollectorReport reconciliation ends", "report", req.NamespacedName, "latency", latency)
 	}()
 
-	// Fetch the MetricCollector instance (cluster-scoped)
-	mc := &localv1alpha1.MetricCollector{}
-	if err := r.MemberClient.Get(ctx, client.ObjectKey{Name: req.Name}, mc); err != nil {
+	// 1. Get MetricCollectorReport from hub cluster
+	report := &localv1alpha1.MetricCollectorReport{}
+	if err := r.HubClient.Get(ctx, req.NamespacedName, report); err != nil {
 		if errors.IsNotFound(err) {
-			klog.V(2).InfoS("MetricCollector not found, ignoring", "metricCollector", req.Name)
+			klog.V(2).InfoS("MetricCollectorReport not found, ignoring", "report", req.NamespacedName)
 			return ctrl.Result{}, nil
 		}
-		klog.ErrorS(err, "Failed to get MetricCollector", "metricCollector", req.Name)
+		klog.ErrorS(err, "Failed to get MetricCollectorReport", "report", req.NamespacedName)
 		return ctrl.Result{}, err
 	}
 
-	// Handle deletion - cleanup MetricCollectorReport on hub
-	if !mc.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(mc, metricCollectorFinalizer) {
-			klog.V(2).InfoS("Cleaning up MetricCollectorReport on hub", "metricCollector", req.Name)
+	klog.InfoS("Reconciling MetricCollectorReport", "name", report.Name, "namespace", report.Namespace)
 
-			// Delete MetricCollectorReport from hub cluster
-			if err := r.deleteReportFromHub(ctx, mc); err != nil {
-				klog.ErrorS(err, "Failed to delete MetricCollectorReport from hub", "metricCollector", req.Name)
-				return ctrl.Result{}, err
-			}
+	// 2. Get PrometheusURL from report spec (or use default)
+	prometheusURL := report.Spec.PrometheusURL
 
-			// Remove finalizer
-			controllerutil.RemoveFinalizer(mc, metricCollectorFinalizer)
-			if err := r.MemberClient.Update(ctx, mc); err != nil {
-				klog.ErrorS(err, "Failed to remove finalizer", "metricCollector", req.Name)
-				return ctrl.Result{}, err
-			}
-			klog.V(2).InfoS("Successfully cleaned up MetricCollectorReport", "metricCollector", req.Name)
-		}
-		return ctrl.Result{}, nil
-	}
+	// 3. Query Prometheus on member cluster for all workload_health metrics
+	promClient := NewPrometheusClient(prometheusURL, "", nil)
+	collectedMetrics, collectErr := r.collectAllWorkloadMetrics(ctx, promClient)
 
-	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(mc, metricCollectorFinalizer) {
-		controllerutil.AddFinalizer(mc, metricCollectorFinalizer)
-		if err := r.MemberClient.Update(ctx, mc); err != nil {
-			klog.ErrorS(err, "Failed to add finalizer", "metricCollector", req.Name)
-			return ctrl.Result{}, err
-		}
-		klog.V(2).InfoS("Added finalizer to MetricCollector", "metricCollector", req.Name)
-	}
-
-	// Collect metrics from Prometheus
-	collectedMetrics, collectErr := r.collectFromPrometheus(ctx, mc)
-
-	// Update status with collected metrics
+	// 5. Update MetricCollectorReport status on hub
 	now := metav1.Now()
-	mc.Status.LastCollectionTime = &now
-	mc.Status.CollectedMetrics = collectedMetrics
-	mc.Status.WorkloadsMonitored = int32(len(collectedMetrics))
-	mc.Status.ObservedGeneration = mc.Generation
+	report.Status.LastCollectionTime = &now
+	report.Status.CollectedMetrics = collectedMetrics
+	report.Status.WorkloadsMonitored = int32(len(collectedMetrics))
 
 	if collectErr != nil {
-		klog.ErrorS(collectErr, "Failed to collect metrics", "metricCollector", req.Name)
-		meta.SetStatusCondition(&mc.Status.Conditions, metav1.Condition{
-			Type:               localv1alpha1.MetricCollectorConditionTypeReady,
-			Status:             metav1.ConditionTrue,
-			ObservedGeneration: mc.Generation,
-			Reason:             "CollectorConfigured",
-			Message:            "Collector is configured",
-		})
-		meta.SetStatusCondition(&mc.Status.Conditions, metav1.Condition{
-			Type:               localv1alpha1.MetricCollectorConditionTypeCollecting,
+		klog.ErrorS(collectErr, "Failed to collect metrics", "prometheusUrl", prometheusURL)
+		meta.SetStatusCondition(&report.Status.Conditions, metav1.Condition{
+			Type:               "MetricsCollected",
 			Status:             metav1.ConditionFalse,
-			ObservedGeneration: mc.Generation,
+			ObservedGeneration: report.Generation,
 			Reason:             "CollectionFailed",
 			Message:            fmt.Sprintf("Failed to collect metrics: %v", collectErr),
 		})
 	} else {
-		klog.V(2).InfoS("Successfully collected metrics", "metricCollector", req.Name, "workloads", len(collectedMetrics))
-		meta.SetStatusCondition(&mc.Status.Conditions, metav1.Condition{
-			Type:               localv1alpha1.MetricCollectorConditionTypeReady,
+		klog.V(2).InfoS("Successfully collected metrics", "report", report.Name, "workloads", len(collectedMetrics))
+		meta.SetStatusCondition(&report.Status.Conditions, metav1.Condition{
+			Type:               "MetricsCollected",
 			Status:             metav1.ConditionTrue,
-			ObservedGeneration: mc.Generation,
-			Reason:             "CollectorConfigured",
-			Message:            "Collector is configured and collecting metrics",
-		})
-		meta.SetStatusCondition(&mc.Status.Conditions, metav1.Condition{
-			Type:               localv1alpha1.MetricCollectorConditionTypeCollecting,
-			Status:             metav1.ConditionTrue,
-			ObservedGeneration: mc.Generation,
+			ObservedGeneration: report.Generation,
 			Reason:             "MetricsCollected",
 			Message:            fmt.Sprintf("Successfully collected metrics from %d workloads", len(collectedMetrics)),
 		})
 	}
 
-	if err := r.MemberClient.Status().Update(ctx, mc); err != nil {
-		klog.ErrorS(err, "Failed to update MetricCollector status", "metricCollector", req.Name)
+	if err := r.HubClient.Status().Update(ctx, report); err != nil {
+		klog.ErrorS(err, "Failed to update MetricCollectorReport status", "report", req.NamespacedName)
 		return ctrl.Result{}, err
 	}
 
-	// Sync MetricCollectorReport to hub cluster
-	if err := r.syncReportToHub(ctx, mc); err != nil {
-		klog.ErrorS(err, "Failed to sync MetricCollectorReport to hub", "metricCollector", req.Name)
-		meta.SetStatusCondition(&mc.Status.Conditions, metav1.Condition{
-			Type:               localv1alpha1.MetricCollectorConditionTypeReported,
-			Status:             metav1.ConditionFalse,
-			ObservedGeneration: mc.Generation,
-			Reason:             "ReportSyncFailed",
-			Message:            fmt.Sprintf("Failed to sync report to hub: %v", err),
-		})
-	} else {
-		meta.SetStatusCondition(&mc.Status.Conditions, metav1.Condition{
-			Type:               localv1alpha1.MetricCollectorConditionTypeReported,
-			Status:             metav1.ConditionTrue,
-			ObservedGeneration: mc.Generation,
-			Reason:             "ReportSyncSucceeded",
-			Message:            "Successfully synced metrics to hub cluster",
-		})
-	}
-
-	// Update status with reporting condition
-	if err := r.MemberClient.Status().Update(ctx, mc); err != nil {
-		klog.ErrorS(err, "Failed to update MetricCollector status with reporting condition", "metricCollector", req.Name)
-		return ctrl.Result{}, err
-	}
-
-	// Requeue after 30 seconds
+	klog.InfoS("Successfully updated MetricCollectorReport", "metricsCount", len(collectedMetrics), "prometheusUrl", prometheusURL)
 	return ctrl.Result{RequeueAfter: defaultCollectionInterval}, nil
 }
 
-// syncReportToHub syncs the MetricCollectorReport to the hub cluster
-func (r *Reconciler) syncReportToHub(ctx context.Context, mc *localv1alpha1.MetricCollector) error {
-	// Use the reportNamespace from the MetricCollector spec
-	reportNamespace := mc.Spec.ReportNamespace
-	if reportNamespace == "" {
-		return fmt.Errorf("reportNamespace is not set in MetricCollector spec")
-	}
+// collectAllWorkloadMetrics queries Prometheus for all workload_health metrics
+func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient PrometheusClient) ([]localv1alpha1.WorkloadMetrics, error) {
+	var collectedMetrics []localv1alpha1.WorkloadMetrics
 
-	// Create or update MetricCollectorReport on hub
-	report := &localv1alpha1.MetricCollectorReport{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      mc.Name,
-			Namespace: reportNamespace,
-			Labels: map[string]string{
-				"metriccollector-name": mc.Name,
-			},
-		},
-	}
+	// Query all workload_health metrics (no filtering)
+	query := "workload_health"
 
-	// Check if report already exists
-	existingReport := &localv1alpha1.MetricCollectorReport{}
-	err := r.HubClient.Get(ctx, client.ObjectKey{Name: mc.Name, Namespace: reportNamespace}, existingReport)
-
-	now := metav1.Now()
+	result, err := promClient.Query(ctx, query)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			// Create new report
-			report.Conditions = mc.Status.Conditions
-			report.ObservedGeneration = mc.Status.ObservedGeneration
-			report.WorkloadsMonitored = mc.Status.WorkloadsMonitored
-			report.LastCollectionTime = mc.Status.LastCollectionTime
-			report.CollectedMetrics = mc.Status.CollectedMetrics
-			report.LastReportTime = &now
+		klog.ErrorS(err, "Failed to query Prometheus for workload_health metrics")
+		return nil, err
+	}
 
-			if err := r.HubClient.Create(ctx, report); err != nil {
-				klog.ErrorS(err, "Failed to create MetricCollectorReport", "report", klog.KObj(report))
-				return err
+	// Parse Prometheus response
+	data, ok := result.(PrometheusData)
+	if !ok {
+		return nil, fmt.Errorf("invalid Prometheus response type")
+	}
+
+	if len(data.Result) == 0 {
+		klog.V(4).InfoS("No workload_health metrics found in Prometheus")
+		return collectedMetrics, nil
+	}
+
+	// Extract metrics from Prometheus result
+	for _, res := range data.Result {
+		namespace := res.Metric["namespace"]
+		workloadName := res.Metric["app"]
+
+		if namespace == "" || workloadName == "" {
+			continue
+		}
+
+		// Extract health value from Prometheus result
+		// Prometheus returns values as [timestamp, value_string] array
+		// We need at least 2 elements: index 0 is timestamp, index 1 is the metric value
+		var health float64
+		if len(res.Value) >= 2 {
+			if valueStr, ok := res.Value[1].(string); ok {
+				fmt.Sscanf(valueStr, "%f", &health)
 			}
-			klog.V(2).InfoS("Created MetricCollectorReport on hub", "report", klog.KObj(report), "reportNamespace", reportNamespace)
-			return nil
 		}
-		return err
-	}
 
-	// Update existing report
-	existingReport.Labels = report.Labels
-	existingReport.Conditions = mc.Status.Conditions
-	existingReport.ObservedGeneration = mc.Status.ObservedGeneration
-	existingReport.WorkloadsMonitored = mc.Status.WorkloadsMonitored
-	existingReport.LastCollectionTime = mc.Status.LastCollectionTime
-	existingReport.CollectedMetrics = mc.Status.CollectedMetrics
-	existingReport.LastReportTime = &now
-
-	if err := r.HubClient.Update(ctx, existingReport); err != nil {
-		klog.ErrorS(err, "Failed to update MetricCollectorReport", "report", klog.KObj(existingReport))
-		return err
-	}
-	klog.V(2).InfoS("Updated MetricCollectorReport on hub", "report", klog.KObj(existingReport), "reportNamespace", reportNamespace)
-	return nil
-}
-
-// deleteReportFromHub deletes the MetricCollectorReport from the hub cluster
-func (r *Reconciler) deleteReportFromHub(ctx context.Context, mc *localv1alpha1.MetricCollector) error {
-	// Use the reportNamespace from the MetricCollector spec
-	reportNamespace := mc.Spec.ReportNamespace
-	if reportNamespace == "" {
-		klog.V(2).InfoS("reportNamespace is not set, skipping deletion", "metricCollector", mc.Name)
-		return nil
-	}
-
-	// Try to delete MetricCollectorReport on hub
-	report := &localv1alpha1.MetricCollectorReport{}
-	err := r.HubClient.Get(ctx, client.ObjectKey{Name: mc.Name, Namespace: reportNamespace}, report)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			klog.V(2).InfoS("MetricCollectorReport not found on hub, already deleted", "report", mc.Name, "namespace", reportNamespace)
-			return nil
+		workloadMetrics := localv1alpha1.WorkloadMetrics{
+			WorkloadName: workloadName,
+			Namespace:    namespace,
+			Health:       health > 0.5, // Convert float to bool: healthy if > 0.5
 		}
-		return fmt.Errorf("failed to get MetricCollectorReport: %w", err)
+		collectedMetrics = append(collectedMetrics, workloadMetrics)
 	}
 
-	if err := r.HubClient.Delete(ctx, report); err != nil && !errors.IsNotFound(err) {
-		return fmt.Errorf("failed to delete MetricCollectorReport: %w", err)
-	}
-
-	klog.InfoS("Deleted MetricCollectorReport from hub", "report", mc.Name, "namespace", reportNamespace)
-	return nil
+	klog.V(2).InfoS("Collected workload metrics from Prometheus", "count", len(collectedMetrics))
+	return collectedMetrics, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.recorder = mgr.GetEventRecorderFor("metriccollector-controller")
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("metriccollector-controller").
-		For(&localv1alpha1.MetricCollector{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&localv1alpha1.MetricCollectorReport{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }

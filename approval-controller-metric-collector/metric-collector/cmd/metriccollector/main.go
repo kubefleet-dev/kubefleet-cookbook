@@ -23,22 +23,21 @@ import (
 	"net/http"
 	"os"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet-cookbook/approval-controller-metric-collector/approval-request-controller/apis/metric/v1alpha1"
 	metriccollector "github.com/kubefleet-dev/kubefleet-cookbook/approval-controller-metric-collector/metric-collector/pkg/controller"
+	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 )
 
 var (
-	memberQPS         = flag.Int("member-qps", 100, "QPS for member cluster client")
-	memberBurst       = flag.Int("member-burst", 200, "Burst for member cluster client")
 	hubQPS            = flag.Int("hub-qps", 100, "QPS for hub cluster client")
 	hubBurst          = flag.Int("hub-burst", 200, "Burst for hub cluster client")
 	metricsAddr       = flag.String("metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
@@ -53,10 +52,16 @@ func main() {
 
 	klog.InfoS("Starting MetricCollector Controller")
 
-	// Get member cluster config (in-cluster)
-	memberConfig := ctrl.GetConfigOrDie()
-	memberConfig.QPS = float32(*memberQPS)
-	memberConfig.Burst = *memberBurst
+	// Get member cluster identity
+	memberClusterName := os.Getenv("MEMBER_CLUSTER_NAME")
+	if memberClusterName == "" {
+		klog.ErrorS(nil, "MEMBER_CLUSTER_NAME environment variable not set")
+		os.Exit(1)
+	}
+
+	// Construct hub namespace
+	hubNamespace := fmt.Sprintf("fleet-member-%s", memberClusterName)
+	klog.InfoS("Using hub namespace", "namespace", hubNamespace, "memberCluster", memberClusterName)
 
 	// Build hub cluster config
 	hubConfig, err := buildHubConfig()
@@ -67,8 +72,8 @@ func main() {
 	hubConfig.QPS = float32(*hubQPS)
 	hubConfig.Burst = *hubBurst
 
-	// Start controller with both clients
-	if err := Start(ctrl.SetupSignalHandler(), hubConfig, memberConfig); err != nil {
+	// Start controller
+	if err := Start(ctrl.SetupSignalHandler(), hubConfig, memberClusterName, hubNamespace); err != nil {
 		klog.ErrorS(err, "Failed to start controller")
 		os.Exit(1)
 	}
@@ -171,20 +176,28 @@ func (t *customHeaderTransport) RoundTrip(req *http.Request) (*http.Response, er
 	return t.Base.RoundTrip(req)
 }
 
-// Start starts the controller with dual managers for hub and member clusters
-func Start(ctx context.Context, hubCfg, memberCfg *rest.Config) error {
+// Start starts the controller with hub cluster connection
+func Start(ctx context.Context, hubCfg *rest.Config, memberClusterName, hubNamespace string) error {
 	// Create scheme with required APIs
 	scheme := runtime.NewScheme()
-	if err := placementv1alpha1.AddToScheme(scheme); err != nil {
-		return fmt.Errorf("failed to add placement API to scheme: %w", err)
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		return fmt.Errorf("failed to add client-go scheme: %w", err)
 	}
-	if err := corev1.AddToScheme(scheme); err != nil {
-		return fmt.Errorf("failed to add core API to scheme: %w", err)
+	if err := placementv1alpha1.AddToScheme(scheme); err != nil {
+		return fmt.Errorf("failed to add placement v1alpha1 API to scheme: %w", err)
+	}
+	if err := placementv1beta1.AddToScheme(scheme); err != nil {
+		return fmt.Errorf("failed to add placement v1beta1 API to scheme: %w", err)
 	}
 
-	// Create member cluster manager (where controller runs and watches MetricCollector)
-	memberMgr, err := ctrl.NewManager(memberCfg, ctrl.Options{
+	// Create hub cluster manager - watches MetricCollectorReport in hub namespace
+	hubMgr, err := ctrl.NewManager(hubCfg, ctrl.Options{
 		Scheme: scheme,
+		Cache: cache.Options{
+			DefaultNamespaces: map[string]cache.Config{
+				hubNamespace: {}, // Only watch fleet-member-<memberClusterName>
+			},
+		},
 		Metrics: metricsserver.Options{
 			BindAddress: *metricsAddr,
 		},
@@ -193,52 +206,32 @@ func Start(ctx context.Context, hubCfg, memberCfg *rest.Config) error {
 		LeaderElectionID:       *leaderElectionID,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create member manager: %w", err)
+		return fmt.Errorf("failed to create hub manager: %w", err)
 	}
 
-	// Create hub cluster client (for writing MetricCollectorReports)
-	hubClient, err := client.New(hubCfg, client.Options{Scheme: scheme})
-	if err != nil {
-		return fmt.Errorf("failed to create hub client: %w", err)
-	}
-
-	// Get Prometheus URL from environment
-	prometheusURL := os.Getenv("PROMETHEUS_URL")
-	if prometheusURL == "" {
-		prometheusURL = "http://prometheus.fleet-system.svc.cluster.local:9090"
-		klog.InfoS("PROMETHEUS_URL not set, using default", "url", prometheusURL)
-	}
-
-	// Create Prometheus client
-	prometheusClient := metriccollector.NewPrometheusClient(prometheusURL, "", nil)
-
-	// Setup MetricCollector controller
+	// Setup MetricCollectorReport controller (watches hub, queries member Prometheus)
 	if err := (&metriccollector.Reconciler{
-		MemberClient:     memberMgr.GetClient(),
-		HubClient:        hubClient,
-		PrometheusClient: prometheusClient,
-	}).SetupWithManager(memberMgr); err != nil {
-		return fmt.Errorf("failed to setup MetricCollector controller: %w", err)
+		HubClient:         hubMgr.GetClient(),
+	}).SetupWithManager(hubMgr); err != nil {
+		return fmt.Errorf("failed to setup controller: %w", err)
 	}
 
 	// Add health checks
-	if err := memberMgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+	if err := hubMgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return fmt.Errorf("failed to add healthz check: %w", err)
 	}
-	if err := memberMgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	if err := hubMgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		return fmt.Errorf("failed to add readyz check: %w", err)
 	}
 
 	klog.InfoS("Starting MetricCollector controller",
 		"hubUrl", hubCfg.Host,
-		"prometheusUrl", prometheusURL,
+		"hubNamespace", hubNamespace,
+		"memberCluster", memberClusterName,
 		"metricsAddr", *metricsAddr,
 		"probeAddr", *probeAddr)
 
-	// Start the manager
-	if err := memberMgr.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start manager: %w", err)
-	}
-
-	return nil
+	// Start hub manager (watches MetricCollectorReport on hub, queries Prometheus on member)
+	klog.InfoS("Starting hub manager", "namespace", hubNamespace)
+	return hubMgr.Start(ctx)
 }

@@ -1,7 +1,7 @@
 {{- if .Values.hubCluster.createRBAC }}
 # This template generates RBAC resources for the hub cluster
 # Apply this on the HUB cluster to grant the metric-collector permissions
-# to create/update MetricCollectorReport resources
+# to watch/update MetricCollectorReport resources in the fleet-member-<cluster> namespace
 #
 # Usage:
 #   helm template metric-collector ./charts/metric-collector \
@@ -9,10 +9,12 @@
 #     --show-only templates/hub-rbac.yaml | kubectl apply -f - --context=hub-cluster
 #
 ---
+# Role for MetricCollectorReport access in fleet-member-<cluster> namespace
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
-  name: {{ include "metric-collector.fullname" . }}-hub-access
+  name: {{ include "metric-collector.fullname" . }}-report-access
+  namespace: fleet-member-{{ .Values.memberCluster.name }}
   labels:
     {{- include "metric-collector.labels" . | nindent 4 }}
     app.kubernetes.io/component: hub-rbac
@@ -22,16 +24,50 @@ rules:
   # MetricCollectorReport access
   - apiGroups: ["metric.kubernetes-fleet.io"]
     resources: ["metriccollectorreports"]
-    verbs: ["get", "list", "create", "update", "patch", "delete"]
-  # Namespace access for fleet-{cluster} namespaces
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["metric.kubernetes-fleet.io"]
+    resources: ["metriccollectorreports/status"]
+    verbs: ["update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "metric-collector.fullname" . }}-report-access
+  namespace: fleet-member-{{ .Values.memberCluster.name }}
+  labels:
+    {{- include "metric-collector.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hub-rbac
+    fleet.kubernetes.io/member-cluster: {{ .Values.memberCluster.name }}
+  annotations:
+    helm.sh/resource-policy: keep
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "metric-collector.fullname" . }}-report-access
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.hubCluster.auth.serviceAccountName | default (include "metric-collector.serviceAccountName" .) }}
+    namespace: fleet-member-{{ .Values.memberCluster.name }}
+---
+# ClusterRole for reading ClusterStagedWorkloadTracker (cluster-scoped)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "metric-collector.fullname" . }}-workloadtracker-reader
+  labels:
+    {{- include "metric-collector.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hub-rbac
+  annotations:
+    helm.sh/resource-policy: keep
+rules:
+  - apiGroups: ["placement.kubernetes-fleet.io"]
+    resources: ["clusterstagedworkloadtrackers"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "metric-collector.fullname" . }}-{{ .Values.memberCluster.name }}
+  name: {{ include "metric-collector.fullname" . }}-{{ .Values.memberCluster.name }}-workloadtracker
   labels:
     {{- include "metric-collector.labels" . | nindent 4 }}
     app.kubernetes.io/component: hub-rbac
@@ -41,9 +77,9 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "metric-collector.fullname" . }}-hub-access
+  name: {{ include "metric-collector.fullname" . }}-workloadtracker-reader
 subjects:
   - kind: ServiceAccount
     name: {{ .Values.hubCluster.auth.serviceAccountName | default (include "metric-collector.serviceAccountName" .) }}
-    namespace: {{ .Values.hubCluster.auth.serviceAccountNamespace | default .Release.Namespace }}
+    namespace: fleet-member-{{ .Values.memberCluster.name }}
 {{- end }}

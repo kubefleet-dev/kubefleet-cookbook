@@ -99,25 +99,52 @@ metadata:
   name: metric-collector-sa
   namespace: ${HUB_NAMESPACE}
 ---
+# Role for MetricCollectorReport access in fleet-member namespace
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: metric-collector-role
+  name: metric-collector-report-role
   namespace: ${HUB_NAMESPACE}
 rules:
 - apiGroups: ["metric.kubernetes-fleet.io"]
   resources: ["metriccollectorreports"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
+  verbs: ["get", "list", "watch", "update", "patch"]
+- apiGroups: ["metric.kubernetes-fleet.io"]
+  resources: ["metriccollectorreports/status"]
+  verbs: ["update", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: metric-collector-rolebinding
+  name: metric-collector-report-rolebinding
   namespace: ${HUB_NAMESPACE}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: metric-collector-role
+  name: metric-collector-report-role
+subjects:
+- kind: ServiceAccount
+  name: metric-collector-sa
+  namespace: ${HUB_NAMESPACE}
+---
+# ClusterRole for reading ClusterStagedWorkloadTracker (cluster-scoped)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: metric-collector-workloadtracker-reader-${MEMBER_CLUSTER_NAME}
+rules:
+- apiGroups: ["placement.kubernetes-fleet.io"]
+  resources: ["clusterstagedworkloadtrackers"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: metric-collector-workloadtracker-${MEMBER_CLUSTER_NAME}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: metric-collector-workloadtracker-reader-${MEMBER_CLUSTER_NAME}
 subjects:
 - kind: ServiceAccount
   name: metric-collector-sa

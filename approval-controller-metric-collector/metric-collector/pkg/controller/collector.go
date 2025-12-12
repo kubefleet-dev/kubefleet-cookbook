@@ -28,9 +28,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
-
-	localv1alpha1 "github.com/kubefleet-dev/kubefleet-cookbook/approval-controller-metric-collector/approval-request-controller/apis/metric/v1alpha1"
 )
 
 // PrometheusClient is the interface for querying Prometheus
@@ -148,59 +145,4 @@ type PrometheusData struct {
 type PrometheusResult struct {
 	Metric map[string]string `json:"metric"`
 	Value  []interface{}     `json:"value"` // [timestamp, value]
-}
-
-// collectFromPrometheus collects metrics from a Prometheus endpoint
-func (r *Reconciler) collectFromPrometheus(ctx context.Context, mc *localv1alpha1.MetricCollector) ([]localv1alpha1.WorkloadMetrics, error) {
-	// Create Prometheus client without auth (simplified)
-	promClient := NewPrometheusClient(mc.Spec.PrometheusURL, "", nil)
-
-	query := buildPromQLQuery(mc)
-	klog.V(4).InfoS("Executing PromQL query", "query", query)
-
-	result, err := promClient.Query(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query Prometheus: %w", err)
-	}
-
-	// Parse Prometheus response
-	data, ok := result.(PrometheusData)
-	if !ok {
-		return nil, fmt.Errorf("invalid Prometheus response type")
-	}
-
-	// Extract metrics for each workload
-	workloadMetrics := make([]localv1alpha1.WorkloadMetrics, 0, len(data.Result))
-	for _, res := range data.Result {
-		namespace := res.Metric["namespace"]
-		workloadName := res.Metric["app"]
-
-		if namespace == "" || workloadName == "" {
-			continue
-		}
-
-		// Extract health value
-		var health float64
-		if len(res.Value) >= 2 {
-			if valueStr, ok := res.Value[1].(string); ok {
-				fmt.Sscanf(valueStr, "%f", &health)
-			}
-		}
-
-		wm := localv1alpha1.WorkloadMetrics{
-			Namespace:    namespace,
-			WorkloadName: workloadName,
-			Health:       health == 1.0, // Convert to boolean: 1.0 = true, 0.0 = false
-		}
-		workloadMetrics = append(workloadMetrics, wm)
-	}
-
-	klog.V(2).InfoS("Collected metrics from Prometheus", "workloads", len(workloadMetrics))
-	return workloadMetrics, nil
-}
-
-// buildPromQLQuery builds a PromQL query for workload_health metric
-func buildPromQLQuery(mc *localv1alpha1.MetricCollector) string {
-	// Query all workload_health metrics (MetricCollector is cluster-scoped)
-	return `workload_health`
 }

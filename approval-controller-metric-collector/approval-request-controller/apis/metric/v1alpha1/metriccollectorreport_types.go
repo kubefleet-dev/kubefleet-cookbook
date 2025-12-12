@@ -22,37 +22,45 @@ import (
 
 // +genclient
 // +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
 // +kubebuilder:resource:scope="Namespaced",shortName=mcr,categories={fleet,fleet-metrics}
 // +kubebuilder:storageversion
-// +kubebuilder:printcolumn:JSONPath=`.workloadsMonitored`,name="Workloads",type=integer
-// +kubebuilder:printcolumn:JSONPath=`.lastCollectionTime`,name="Last-Collection",type=date
+// +kubebuilder:printcolumn:JSONPath=`.status.workloadsMonitored`,name="Workloads",type=integer
+// +kubebuilder:printcolumn:JSONPath=`.status.lastCollectionTime`,name="Last-Collection",type=date
 // +kubebuilder:printcolumn:JSONPath=`.metadata.creationTimestamp`,name="Age",type=date
 
-// MetricCollectorReport is created by the MetricCollector controller on the hub cluster
-// in the fleet-member-{clusterName} namespace to report collected metrics from a member cluster.
-// The controller watches MetricCollector objects on the member cluster, collects metrics,
-// and syncs the status to the hub as MetricCollectorReport objects.
+// MetricCollectorReport is created by the approval-request-controller on the hub cluster
+// in the fleet-member-{clusterName} namespace. The metric-collector on the member cluster
+// watches these reports and updates their status with collected metrics.
 //
 // Controller workflow:
-// 1. MetricCollector reconciles and collects metrics on member cluster
-// 2. Metrics include clusterName from workload_health labels
-// 3. Controller creates/updates MetricCollectorReport in fleet-member-{clusterName} namespace on hub
-// 4. Report name matches MetricCollector name for easy lookup
+// 1. Approval-controller creates MetricCollectorReport with spec on hub
+// 2. Metric-collector watches MetricCollectorReport on hub (in fleet-member-{clusterName} namespace)
+// 3. Metric-collector queries Prometheus on member cluster
+// 4. Metric-collector updates MetricCollectorReport status on hub with collected metrics
 //
-// Namespace: fleet-member-{clusterName} (extracted from CollectedMetrics[0].ClusterName)
-// Name: Same as MetricCollector name
-// All metrics in CollectedMetrics are guaranteed to have the same ClusterName.
+// Namespace: fleet-member-{clusterName}
+// Name: Matches the UpdateRun name
 type MetricCollectorReport struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// Conditions copied from the MetricCollector status.
+	Spec   MetricCollectorReportSpec   `json:"spec,omitempty"`
+	Status MetricCollectorReportStatus `json:"status,omitempty"`
+}
+
+// MetricCollectorReportSpec defines the configuration for metric collection.
+type MetricCollectorReportSpec struct {
+	// PrometheusURL is the URL of the Prometheus server on the member cluster
+	// Example: "http://prometheus.fleet-system.svc.cluster.local:9090"
+	PrometheusURL string `json:"prometheusUrl"`
+}
+
+// MetricCollectorReportStatus contains the collected metrics from the member cluster.
+type MetricCollectorReportStatus struct {
+	// Conditions represent the latest available observations of the report's state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-
-	// ObservedGeneration is the generation most recently observed from the MetricCollector.
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// WorkloadsMonitored is the count of workloads being monitored.
 	// +optional
@@ -63,13 +71,23 @@ type MetricCollectorReport struct {
 	LastCollectionTime *metav1.Time `json:"lastCollectionTime,omitempty"`
 
 	// CollectedMetrics contains the most recent metrics from each workload.
-	// All metrics are guaranteed to have the same ClusterName since they're collected from one member cluster.
 	// +optional
 	CollectedMetrics []WorkloadMetrics `json:"collectedMetrics,omitempty"`
+}
 
-	// LastReportTime is when this report was last synced to the hub.
-	// +optional
-	LastReportTime *metav1.Time `json:"lastReportTime,omitempty"`
+// WorkloadMetrics represents metrics collected from a single workload pod.
+type WorkloadMetrics struct {
+	// Namespace of the workload.
+	// +required
+	Namespace string `json:"namespace"`
+
+	// WorkloadName from the workload_health metric label.
+	// +required
+	WorkloadName string `json:"workloadName"`
+
+	// Health indicates if the workload is healthy (true=healthy, false=unhealthy).
+	// +required
+	Health bool `json:"health"`
 }
 
 // +kubebuilder:object:root=true
