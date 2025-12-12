@@ -1,0 +1,9 @@
+apiVersion: metric.kubernetes-fleet.io/v1alpha1
+kind: StagedWorkloadTracker
+metadata:
+  # The name and namespace must match the name and namespace of the StagedUpdateRun it is used for
+  name: example-staged-run
+  namespace: test-ns
+workloads:
+  - name: sample-metric-app
+    namespace: test-ns

@@ -1,0 +1,8 @@
+apiVersion: metric.kubernetes-fleet.io/v1alpha1
+kind: MetricCollector
+metadata:
+  name: mc-example-run-staging
+spec:
+  prometheusURL: "http://prometheus.test-ns:9090"
+  promQLQuery: "workload_health"
+  reportNamespace: "fleet-member-cluster-1"

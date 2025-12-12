@@ -1,0 +1,14 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: ClusterResourcePlacement
+metadata:
+  name: example-crp
+spec:
+  resourceSelectors:
+    - group: ""
+      kind: Namespace
+      name: test-ns
+      version: v1
+  policy:
+    placementType: PickAll
+  strategy:
+    type: External

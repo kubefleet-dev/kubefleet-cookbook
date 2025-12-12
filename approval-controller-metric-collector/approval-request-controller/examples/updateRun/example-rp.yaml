@@ -1,0 +1,15 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: ResourcePlacement
+metadata:
+  name: example-rp
+  namespace: test-ns
+spec:
+  resourceSelectors:
+    - group: "apps"
+      kind: Deployment
+      name: sample-metric-app
+      version: v1
+  policy:
+    placementType: PickAll
+  strategy:
+    type: External

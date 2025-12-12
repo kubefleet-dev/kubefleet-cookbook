@@ -1,0 +1,19 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: StagedUpdateStrategy
+metadata:
+  name: example-staged-strategy
+  namespace: test-ns
+spec:
+  stages:
+    - name: staging
+      labelSelector:
+        matchLabels:
+          environment: staging
+      afterStageTasks:
+        - type: Approval
+    - name: prod
+      labelSelector:
+        matchLabels:
+          environment: prod
+      afterStageTasks:
+        - type: Approval
