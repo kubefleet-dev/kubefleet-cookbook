@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // Package controller features a controller to reconcile ApprovalRequest objects
-// and create MetricCollector resources on member clusters for approved stages.
+// and create MetricCollectorReport resources on the hub cluster for metric collection.
 package controller
 
 import (
@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"time"
 
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,15 +41,15 @@ import (
 )
 
 const (
-	// metricCollectorFinalizer is the finalizer added to ApprovalRequest objects
-	metricCollectorFinalizer = "kubernetes-fleet.io/metric-collector-cleanup"
+	// metricCollectorFinalizer is the finalizer added to ApprovalRequest objects for cleanup
+	metricCollectorFinalizer = "kubernetes-fleet.io/metric-collector-report-cleanup"
 
-	// prometheusURL is the default Prometheus URL to use
+	// prometheusURL is the default Prometheus URL to use for all clusters
 	prometheusURL = "http://prometheus.prometheus.svc.cluster.local:9090"
 )
 
-// Reconciler reconciles an ApprovalRequest object and creates MetricCollector resources
-// on member clusters when the approval is granted.
+// Reconciler reconciles an ApprovalRequest object and creates MetricCollectorReport resources
+// on the hub cluster in fleet-member-{clusterName} namespaces.
 type Reconciler struct {
 	client.Client
 	recorder record.EventRecorder
@@ -182,13 +181,13 @@ func (r *Reconciler) reconcileApprovalRequestObj(ctx context.Context, approvalRe
 
 	klog.V(2).InfoS("Found clusters in stage", "approvalRequest", approvalReqRef, "stage", stageName, "clusters", clusterNames)
 
-	// Create or update the MetricCollector resource, CRP, and ResourceOverrides
-	if err := r.ensureMetricCollectorResources(ctx, obj, clusterNames, updateRunName, stageName); err != nil {
-		klog.ErrorS(err, "Failed to ensure MetricCollector resources", "approvalRequest", approvalReqRef)
+	// Create or update MetricCollectorReport resources in fleet-member namespaces
+	if err := r.ensureMetricCollectorReports(ctx, obj, clusterNames, updateRunName, stageName); err != nil {
+		klog.ErrorS(err, "Failed to ensure MetricCollectorReport resources", "approvalRequest", approvalReqRef)
 		return ctrl.Result{}, err
 	}
 
-	klog.V(2).InfoS("Successfully ensured MetricCollector resources", "approvalRequest", approvalReqRef, "clusters", clusterNames)
+	klog.V(2).InfoS("Successfully ensured MetricCollectorReport resources", "approvalRequest", approvalReqRef, "clusters", clusterNames)
 
 	// Check workload health and approve if all workloads are healthy
 	if err := r.checkWorkloadHealthAndApprove(ctx, approvalReqObj, clusterNames, updateRunName, stageName); err != nil {
@@ -200,154 +199,67 @@ func (r *Reconciler) reconcileApprovalRequestObj(ctx context.Context, approvalRe
 	return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 }
 
-// ensureMetricCollectorResources creates the Namespace, MetricCollector, CRP, and ResourceOverrides
-func (r *Reconciler) ensureMetricCollectorResources(
+// ensureMetricCollectorReports creates MetricCollectorReport in each fleet-member-{clusterName} namespace
+func (r *Reconciler) ensureMetricCollectorReports(
 	ctx context.Context,
 	approvalReq client.Object,
 	clusterNames []string,
 	updateRunName, stageName string,
 ) error {
-	// Generate names
-	metricCollectorName := fmt.Sprintf("mc-%s-%s", updateRunName, stageName)
-	crpName := fmt.Sprintf("crp-mc-%s-%s", updateRunName, stageName)
-	roName := fmt.Sprintf("ro-mc-%s-%s", updateRunName, stageName)
+	// Generate report name (same for all clusters, different namespaces)
+	reportName := fmt.Sprintf("mc-%s-%s", updateRunName, stageName)
 
-	// Create MetricCollector resource (cluster-scoped) on hub
-	metricCollector := &localv1alpha1.MetricCollector{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: metricCollectorName,
-			Labels: map[string]string{
-				"app":              "metric-collector",
-				"approval-request": approvalReq.GetName(),
-				"update-run":       updateRunName,
-				"stage":            stageName,
-			},
-		},
-		Spec: localv1alpha1.MetricCollectorSpec{
-			PrometheusURL: prometheusURL,
-			// ReportNamespace will be overridden per cluster
-			ReportNamespace: "placeholder",
-		},
-	}
-
-	// Create or update MetricCollector
-	existingMC := &localv1alpha1.MetricCollector{}
-	err := r.Client.Get(ctx, types.NamespacedName{Name: metricCollectorName}, existingMC)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			if err := r.Client.Create(ctx, metricCollector); err != nil {
-				return fmt.Errorf("failed to create MetricCollector: %w", err)
-			}
-			klog.V(2).InfoS("Created MetricCollector", "metricCollector", klog.KObj(metricCollector))
-		} else {
-			return fmt.Errorf("failed to get MetricCollector: %w", err)
-		}
-	}
-
-	// Create ResourceOverride with rules for each cluster
-	overrideRules := make([]placementv1beta1.OverrideRule, 0, len(clusterNames))
+	// Create MetricCollectorReport in each fleet-member namespace
 	for _, clusterName := range clusterNames {
 		reportNamespace := fmt.Sprintf(utils.NamespaceNameFormat, clusterName)
 
-		overrideRules = append(overrideRules, placementv1beta1.OverrideRule{
-			ClusterSelector: &placementv1beta1.ClusterSelector{
-				ClusterSelectorTerms: []placementv1beta1.ClusterSelectorTerm{
-					{
-						LabelSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"kubernetes-fleet.io/cluster-name": clusterName,
-							},
-						},
-					},
+		report := &localv1alpha1.MetricCollectorReport{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      reportName,
+				Namespace: reportNamespace,
+				Labels: map[string]string{
+					"approval-request": approvalReq.GetName(),
+					"update-run":       updateRunName,
+					"stage":            stageName,
+					"cluster":          clusterName,
 				},
 			},
-			JSONPatchOverrides: []placementv1beta1.JSONPatchOverride{
-				{
-					Operator: placementv1beta1.JSONPatchOverrideOpReplace,
-					Path:     "/spec/reportNamespace",
-					Value:    apiextensionsv1.JSON{Raw: []byte(fmt.Sprintf(`"%s"`, reportNamespace))},
-				},
+			Spec: localv1alpha1.MetricCollectorReportSpec{
+				PrometheusURL: prometheusURL,
 			},
-		})
-	}
-
-	// Create ClusterResourceOverride with rules for each cluster
-	clusterResourceOverride := &placementv1beta1.ClusterResourceOverride{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: roName,
-			Labels: map[string]string{
-				"approval-request": approvalReq.GetName(),
-				"update-run":       updateRunName,
-				"stage":            stageName,
-			},
-		},
-		Spec: placementv1beta1.ClusterResourceOverrideSpec{
-			ClusterResourceSelectors: []placementv1beta1.ResourceSelectorTerm{
-				{
-					Group:   "metric.kubernetes-fleet.io",
-					Version: "v1alpha1",
-					Kind:    "MetricCollector",
-					Name:    metricCollectorName,
-				},
-			},
-			Policy: &placementv1beta1.OverridePolicy{
-				OverrideRules: overrideRules,
-			},
-		},
-	}
-
-	// Create or update ClusterResourceOverride
-	existingCRO := &placementv1beta1.ClusterResourceOverride{}
-	err = r.Client.Get(ctx, types.NamespacedName{Name: roName}, existingCRO)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			if err := r.Client.Create(ctx, clusterResourceOverride); err != nil {
-				return fmt.Errorf("failed to create ClusterResourceOverride: %w", err)
-			}
-			klog.V(2).InfoS("Created ClusterResourceOverride", "clusterResourceOverride", roName)
-		} else {
-			return fmt.Errorf("failed to get ClusterResourceOverride: %w", err)
 		}
-	}
 
-	// Create ClusterResourcePlacement with PickFixed policy
-	// CRP resource selector selects the MetricCollector directly
-	crp := &placementv1beta1.ClusterResourcePlacement{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: crpName,
-			Labels: map[string]string{
-				"approval-request": approvalReq.GetName(),
-				"update-run":       updateRunName,
-				"stage":            stageName,
-			},
-		},
-		Spec: placementv1beta1.PlacementSpec{
-			ResourceSelectors: []placementv1beta1.ResourceSelectorTerm{
-				{
-					Group:   "metric.kubernetes-fleet.io",
-					Version: "v1alpha1",
-					Kind:    "MetricCollector",
-					Name:    metricCollectorName,
-				},
-			},
-			Policy: &placementv1beta1.PlacementPolicy{
-				PlacementType: placementv1beta1.PickFixedPlacementType,
-				ClusterNames:  clusterNames,
-			},
-		},
-	}
+		// Create or update MetricCollectorReport
+		existingReport := &localv1alpha1.MetricCollectorReport{}
+		err := r.Client.Get(ctx, types.NamespacedName{
+			Name:      reportName,
+			Namespace: reportNamespace,
+		}, existingReport)
 
-	// Create or update CRP
-	existingCRP := &placementv1beta1.ClusterResourcePlacement{}
-	err = r.Client.Get(ctx, types.NamespacedName{Name: crpName}, existingCRP)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			if err := r.Client.Create(ctx, crp); err != nil {
-				return fmt.Errorf("failed to create ClusterResourcePlacement: %w", err)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				if err := r.Client.Create(ctx, report); err != nil {
+					return fmt.Errorf("failed to create MetricCollectorReport in %s: %w", reportNamespace, err)
+				}
+				klog.V(2).InfoS("Created MetricCollectorReport",
+					"report", reportName,
+					"namespace", reportNamespace,
+					"cluster", clusterName)
+			} else {
+				return fmt.Errorf("failed to get MetricCollectorReport in %s: %w", reportNamespace, err)
 			}
-			klog.V(2).InfoS("Created ClusterResourcePlacement", "crp", crpName)
 		} else {
-			return fmt.Errorf("failed to get ClusterResourcePlacement: %w", err)
+			// Update spec if needed
+			if existingReport.Spec.PrometheusURL != prometheusURL {
+				existingReport.Spec.PrometheusURL = prometheusURL
+				if err := r.Client.Update(ctx, existingReport); err != nil {
+					return fmt.Errorf("failed to update MetricCollectorReport in %s: %w", reportNamespace, err)
+				}
+				klog.V(2).InfoS("Updated MetricCollectorReport",
+					"report", reportName,
+					"namespace", reportNamespace,
+					"cluster", clusterName)
+			}
 		}
 	}
 
@@ -465,15 +377,15 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 		klog.V(2).InfoS("Found MetricCollectorReport",
 			"approvalRequest", approvalReqRef,
 			"cluster", clusterName,
-			"collectedMetrics", len(report.CollectedMetrics),
-			"workloadsMonitored", report.WorkloadsMonitored)
+			"collectedMetrics", len(report.Status.CollectedMetrics),
+			"workloadsMonitored", report.Status.WorkloadsMonitored)
 
 		// Check if all workloads from WorkloadTracker are present and healthy
 		for _, trackedWorkload := range workloads {
 			found := false
 			healthy := false
 
-			for _, collectedMetric := range report.CollectedMetrics {
+			for _, collectedMetric := range report.Status.CollectedMetrics {
 				if collectedMetric.Namespace == trackedWorkload.Namespace &&
 					collectedMetric.WorkloadName == trackedWorkload.Name {
 					found = true
@@ -562,40 +474,77 @@ func (r *Reconciler) handleDelete(ctx context.Context, approvalReqObj placementv
 	}
 
 	approvalReqRef := klog.KObj(obj)
-	klog.V(2).InfoS("Cleaning up resources for ApprovalRequest", "approvalRequest", approvalReqRef)
+	klog.V(2).InfoS("Cleaning up MetricCollectorReports for ApprovalRequest", "approvalRequest", approvalReqRef)
 
-	// Delete CRP (it will cascade delete the resources on member clusters)
+	// Get cluster names from UpdateRun to know which reports to delete
 	spec := approvalReqObj.GetApprovalRequestSpec()
 	updateRunName := spec.TargetUpdateRun
 	stageName := spec.TargetStage
-	crpName := fmt.Sprintf("crp-mc-%s-%s", updateRunName, stageName)
-	metricCollectorName := fmt.Sprintf("mc-%s-%s", updateRunName, stageName)
-	croName := fmt.Sprintf("ro-mc-%s-%s", updateRunName, stageName)
+	reportName := fmt.Sprintf("mc-%s-%s", updateRunName, stageName)
 
-	crp := &placementv1beta1.ClusterResourcePlacement{}
-	if err := r.Client.Get(ctx, types.NamespacedName{Name: crpName}, crp); err == nil {
-		if err := r.Client.Delete(ctx, crp); err != nil && !errors.IsNotFound(err) {
-			return ctrl.Result{}, fmt.Errorf("failed to delete CRP: %w", err)
+	// Fetch UpdateRun to get cluster names
+	var clusterNames []string
+	if obj.GetNamespace() == "" {
+		// Cluster-scoped: Get ClusterStagedUpdateRun
+		updateRun := &placementv1beta1.ClusterStagedUpdateRun{}
+		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName}, updateRun); err != nil {
+			if !errors.IsNotFound(err) {
+				klog.ErrorS(err, "Failed to get ClusterStagedUpdateRun for cleanup", "approvalRequest", approvalReqRef)
+			}
+			// Continue with finalizer removal even if UpdateRun not found
+		} else {
+			// Find the stage
+			for i := range updateRun.Status.StagesStatus {
+				if updateRun.Status.StagesStatus[i].StageName == stageName {
+					for _, cluster := range updateRun.Status.StagesStatus[i].Clusters {
+						clusterNames = append(clusterNames, cluster.ClusterName)
+					}
+					break
+				}
+			}
 		}
-		klog.V(2).InfoS("Deleted ClusterResourcePlacement", "crp", crpName)
+	} else {
+		// Namespace-scoped: Get StagedUpdateRun
+		updateRun := &placementv1beta1.StagedUpdateRun{}
+		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName, Namespace: obj.GetNamespace()}, updateRun); err != nil {
+			if !errors.IsNotFound(err) {
+				klog.ErrorS(err, "Failed to get StagedUpdateRun for cleanup", "approvalRequest", approvalReqRef)
+			}
+			// Continue with finalizer removal even if UpdateRun not found
+		} else {
+			// Find the stage
+			for i := range updateRun.Status.StagesStatus {
+				if updateRun.Status.StagesStatus[i].StageName == stageName {
+					for _, cluster := range updateRun.Status.StagesStatus[i].Clusters {
+						clusterNames = append(clusterNames, cluster.ClusterName)
+					}
+					break
+				}
+			}
+		}
 	}
 
-	// Delete ClusterResourceOverride
-	cro := &placementv1beta1.ClusterResourceOverride{}
-	if err := r.Client.Get(ctx, types.NamespacedName{Name: croName}, cro); err == nil {
-		if err := r.Client.Delete(ctx, cro); err != nil && !errors.IsNotFound(err) {
-			return ctrl.Result{}, fmt.Errorf("failed to delete ClusterResourceOverride: %w", err)
-		}
-		klog.V(2).InfoS("Deleted ClusterResourceOverride", "clusterResourceOverride", croName)
-	}
+	// Delete MetricCollectorReport from each fleet-member namespace
+	for _, clusterName := range clusterNames {
+		reportNamespace := fmt.Sprintf(utils.NamespaceNameFormat, clusterName)
+		report := &localv1alpha1.MetricCollectorReport{}
 
-	// Delete MetricCollector
-	metricCollector := &localv1alpha1.MetricCollector{}
-	if err := r.Client.Get(ctx, types.NamespacedName{Name: metricCollectorName}, metricCollector); err == nil {
-		if err := r.Client.Delete(ctx, metricCollector); err != nil && !errors.IsNotFound(err) {
-			return ctrl.Result{}, fmt.Errorf("failed to delete MetricCollector: %w", err)
+		if err := r.Client.Get(ctx, types.NamespacedName{
+			Name:      reportName,
+			Namespace: reportNamespace,
+		}, report); err == nil {
+			if err := r.Client.Delete(ctx, report); err != nil && !errors.IsNotFound(err) {
+				klog.ErrorS(err, "Failed to delete MetricCollectorReport",
+					"report", reportName,
+					"namespace", reportNamespace,
+					"cluster", clusterName)
+				return ctrl.Result{}, fmt.Errorf("failed to delete MetricCollectorReport in %s: %w", reportNamespace, err)
+			}
+			klog.V(2).InfoS("Deleted MetricCollectorReport",
+				"report", reportName,
+				"namespace", reportNamespace,
+				"cluster", clusterName)
 		}
-		klog.V(2).InfoS("Deleted MetricCollector", "metricCollector", metricCollectorName)
 	}
 
 	// Remove finalizer
@@ -605,7 +554,7 @@ func (r *Reconciler) handleDelete(ctx context.Context, approvalReqObj placementv
 		return ctrl.Result{}, err
 	}
 
-	klog.V(2).InfoS("Successfully cleaned up resources", "approvalRequest", approvalReqRef)
+	klog.V(2).InfoS("Successfully cleaned up MetricCollectorReports", "approvalRequest", approvalReqRef, "clusters", clusterNames)
 	return ctrl.Result{}, nil
 }
 
