@@ -6,7 +6,7 @@ This tutorial demonstrates how to use the Approval Request Controller and Metric
 
 This directory contains two controllers:
 - **approval-request-controller**: Runs on the hub cluster to automate approval decisions for staged updates
-- **metric-collector**: Runs on member clusters to collect workload health metrics from Prometheus
+- **metric-collector**: Runs on member clusters to collect and report workload health metrics
 
 ![Approval Controller and Metric Collector Architecture](./images/approval-controller-metric-collector.png)
 
@@ -18,24 +18,19 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
 
 #### Hub Cluster CRDs
 
-1. **MetricCollector** (cluster-scoped)
-   - Defines Prometheus connection details and where to report metrics
-   - Gets propagated to member clusters via ClusterResourcePlacement (CRP)
-   - Each member cluster receives a customized version with its specific `reportNamespace`
+1. **MetricCollectorReport** (namespaced)
+   - Created by approval-request-controller in `fleet-member-<cluster-name>` namespaces on hub
+   - Watched and updated by metric-collector running on member clusters
+   - Contains specification of Prometheus URL and collected `workload_health` metrics
+   - Updated every 30 seconds by the metric collector with latest health data
 
-2. **MetricCollectorReport** (namespaced)
-   - Created by metric-collector on member clusters, reported back to hub
-   - Lives in `fleet-member-<cluster-name>` namespaces on the hub
-   - Contains collected `workload_health` metrics for all workloads in a cluster
-   - Updated every 30 seconds by the metric collector
-
-3. **ClusterStagedWorkloadTracker** (cluster-scoped)
+2. **ClusterStagedWorkloadTracker** (cluster-scoped)
    - Defines which workloads to monitor for a ClusterStagedUpdateRun
    - The name must match the ClusterStagedUpdateRun name
    - Specifies workload's name, namespace and expected health status
    - Used by approval-request-controller to determine if stage is ready for approval
 
-4. **StagedWorkloadTracker** (namespaced)
+3. **StagedWorkloadTracker** (namespaced)
    - Defines which workloads to monitor for a StagedUpdateRun
    - The name and namespace must match the StagedUpdateRun name and namespace
    - Specifies namespace, workload name, and expected health status
@@ -48,22 +43,21 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
    - KubeFleet creates an ApprovalRequest (`ClusterApprovalRequest` or `ApprovalRequest`) for the first stage
    - The ApprovalRequest enters "Pending" state, waiting for approval
 
-2. **Metric Collector Deployment**
-   - Approval-request-controller watches the `ClusterApprovalRequest`, `ApprovalRequest` objects
-   - Creates a `MetricCollector` resource on the hub (cluster-scoped)
-   - Creates a `ClusterResourceOverride` with per-cluster customization rules
-     - Each cluster gets a unique `reportNamespace`: `fleet-member-<cluster-name>`
-   - Creates a `ClusterResourcePlacement` (CRP) with `PickFixed` policy
-     - Targets all clusters in the current stage
-   - KubeFleet propagates the customized `MetricCollector` to each member cluster
+2. **Metric Collector Report Creation**
+   - Approval-request-controller watches the `ClusterApprovalRequest` and `ApprovalRequest` objects
+   - For each cluster in the current stage:
+     - Creates a `MetricCollectorReport` in `fleet-member-<cluster-name>` namespace on hub
+     - Sets `spec.prometheusUrl` to the Prometheus endpoint
+     - Each report is specific to one cluster
 
 3. **Metric Collection on Member Clusters**
    - Metric-collector controller runs on each member cluster
+   - Watches for `MetricCollectorReport` in its `fleet-member-<cluster-name>` namespace on hub
    - Every 30 seconds, it:
-     - Queries local Prometheus with PromQL: `workload_health`
+     - Queries local Prometheus using URL from report spec with PromQL: `workload_health`
      - Prometheus returns metrics for all pods with `prometheus.io/scrape: "true"` annotation
      - Extracts workload health (1.0 = healthy, 0.0 = unhealthy)
-     - Creates/updates `MetricCollectorReport` on hub in `fleet-member-<cluster-name>` namespace
+     - Updates the `MetricCollectorReport` status on hub with collected metrics
    
 4. **Health Evaluation**
    - Approval-request-controller monitors `MetricCollectorReports` from all stage clusters
@@ -72,7 +66,7 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
        - For cluster-scoped: `ClusterStagedWorkloadTracker` with same name as ClusterStagedUpdateRun
        - For namespace-scoped: `StagedWorkloadTracker` with same name and namespace as StagedUpdateRun
      - For each cluster in the stage:
-       - Reads its `MetricCollectorReport` from `fleet-member-<cluster-name>` namespace
+       - Reads its `MetricCollectorReport` status from `fleet-member-<cluster-name>` namespace
        - Verifies all tracked workloads are present and healthy
      - If any workload is missing or unhealthy, waits for next cycle
      - If ALL workloads across ALL clusters are healthy:
@@ -221,8 +215,8 @@ Before diving into the setup steps, here's a bird's eye view of what you'll be b
 
 3. **Approval Request Controller**
    - Watches `ClusterApprovalRequest` and `ApprovalRequest` objects
-   - Deploys MetricCollector to stage clusters via ClusterResourcePlacement
-   - Evaluates workload health from MetricCollectorReports
+   - Creates MetricCollectorReport directly in `fleet-member-<cluster-name>` namespaces
+   - Evaluates workload health from MetricCollectorReport status
    - Auto-approves stages when all workloads are healthy
 
 4. **Sample Metric App** (will be rolled out to clusters)
@@ -232,9 +226,9 @@ Before diving into the setup steps, here's a bird's eye view of what you'll be b
 
 **Member Clusters** - Where workloads run:
 1. **Metric Collector**
-   - Queries local Prometheus every 30 seconds
-   - Reports workload health back to hub cluster
-   - Creates/updates MetricCollectorReport in hub's `fleet-member-<cluster-name>` namespace
+   - Connects to hub cluster to watch MetricCollectorReport in its namespace
+   - Queries local Prometheus every 30 seconds using URL from MetricCollectorReport spec
+   - Updates MetricCollectorReport status on hub with collected health metrics
 
 2. **Prometheus** (received from hub)
    - Runs on each member cluster
@@ -284,15 +278,15 @@ When you create a **ClusterStagedUpdateRun** or **StagedUpdateRun**, here's what
 
 1. **Stage 1 (staging)**: Rollout starts with `kind-cluster-1`
    - KubeFleet creates an ApprovalRequest for the staging stage
-   - Approval controller deploys MetricCollector to `kind-cluster-1`
-   - Metric collector reports health metrics back to hub
+   - Approval controller creates MetricCollectorReport in `fleet-member-kind-cluster-1` namespace
+   - Metric collector on `kind-cluster-1` watches its report on hub and updates status with health metrics
    - When `sample-metric-app` is healthy, approval controller auto-approves
    - KubeFleet proceeds with the rollout to `kind-cluster-1`
 
 2. **Stage 2 (prod)**: After staging succeeds
    - KubeFleet creates an ApprovalRequest for the prod stage
-   - Approval controller deploys MetricCollector to `kind-cluster-2` and `kind-cluster-3`
-   - Metric collectors report health from both clusters
+   - Approval controller creates MetricCollectorReports in `fleet-member-kind-cluster-2` and `fleet-member-kind-cluster-3`
+   - Metric collectors on both clusters watch their reports and update with health data
    - When ALL workloads across BOTH prod clusters are healthy, auto-approve
    - KubeFleet completes the rollout to production clusters
 
@@ -305,8 +299,7 @@ When you create a **ClusterStagedUpdateRun** or **StagedUpdateRun**, here's what
 | **StagedUpdateStrategy** | Define stages with label selectors and approval requirements | Hub |
 | **WorkloadTracker** | Specify which workloads to monitor for health | Hub |
 | **UpdateRun** | Start the staged rollout process | Hub |
-| **MetricCollector** | Automatically created by approval controller per stage | Hub → Member |
-| **MetricCollectorReport** | Automatically created by metric collector | Member → Hub |
+| **MetricCollectorReport** | Created by approval controller, updated by metric collector | Hub (fleet-member-* ns) |
 
 ### What the Installation Scripts Do
 
@@ -314,15 +307,15 @@ When you create a **ClusterStagedUpdateRun** or **StagedUpdateRun**, here's what
 - Takes ACR registry URL and hub cluster name as parameters
 - Pulls approval-request-controller image from ACR
 - Verifies KubeFleet CRDs are installed
-- Installs controller via Helm with custom CRDs (MetricCollector, MetricCollectorReport, WorkloadTracker)
-- Sets up RBAC for managing placements, overrides, and approval requests
+- Installs controller via Helm with custom CRDs (MetricCollectorReport, WorkloadTrackers)
+- Sets up RBAC for managing MetricCollectorReports and reading approval requests
 
 **`install-on-member.sh`** (Metric Collector):
 - Takes ACR registry URL, hub cluster, and member cluster names as parameters
-- Pulls metric-collector and metric-app images from ACR
-- Creates service account with hub cluster access token
+- Pulls metric-collector image from ACR
+- Creates service account with hub cluster access token and RBAC for watching/updating MetricCollectorReports
 - Installs metric-collector via Helm on each member cluster
-- Configures connection to hub API server and local Prometheus
+- Configures connection to hub API server to watch reports and local Prometheus for metrics
 
 With this understanding, you're ready to start the setup!
 
@@ -692,13 +685,7 @@ kubectl logs -n default deployment/metric-collector -f
 
 ### Check Metrics Collection
 
-Verify that MetricCollector resources exist on member clusters:
-```bash
-kubectl config use-context kind-cluster-1
-kubectl get metriccollector -A
-```
-
-Verify that MetricCollectorReports are being created on the hub:
+Verify that MetricCollectorReports are being created and updated on the hub:
 ```bash
 kubectl config use-context kind-hub
 kubectl get metriccollectorreport -A
