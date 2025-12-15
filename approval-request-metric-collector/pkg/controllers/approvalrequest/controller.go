@@ -41,7 +41,7 @@ import (
 )
 
 const (
-	// metricCollectorFinalizer is the finalizer added to ApprovalRequest objects for cleanup
+	// metricCollectorFinalizer is the finalizer added to ApprovalRequest objects for cleanup.
 	metricCollectorFinalizer = "kubernetes-fleet.io/metric-collector-report-cleanup"
 
 	// prometheusURL is the default Prometheus URL to use for all clusters
@@ -205,6 +205,10 @@ func (r *Reconciler) ensureMetricCollectorReports(
 	reportName := fmt.Sprintf("mc-%s-%s", updateRunName, stageName)
 
 	// Create MetricCollectorReport in each fleet-member namespace
+	// Note: We cannot use owner references here because Kubernetes does not allow cross-namespace
+	// owner references. The ApprovalRequest (in one namespace or cluster-scoped) cannot be set as
+	// the owner of MetricCollectorReports in different fleet-member-* namespaces. Instead, we use
+	// a finalizer on the ApprovalRequest to ensure proper cleanup when it's deleted.
 	for _, clusterName := range clusterNames {
 		reportNamespace := fmt.Sprintf(utils.NamespaceNameFormat, clusterName)
 

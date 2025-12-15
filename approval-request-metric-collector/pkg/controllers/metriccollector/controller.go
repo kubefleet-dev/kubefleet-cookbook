@@ -115,16 +115,10 @@ func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient P
 	// Query all workload_health metrics (no filtering)
 	query := "workload_health"
 
-	result, err := promClient.Query(ctx, query)
+	data, err := promClient.Query(ctx, query)
 	if err != nil {
 		klog.ErrorS(err, "Failed to query Prometheus for workload_health metrics")
 		return nil, err
-	}
-
-	// Parse Prometheus response
-	data, ok := result.(PrometheusData)
-	if !ok {
-		return nil, fmt.Errorf("invalid Prometheus response type")
 	}
 
 	if len(data.Result) == 0 {
@@ -157,10 +151,14 @@ func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient P
 			}
 		}
 
+		// Convert float to bool: workload is healthy if metric value >= 1.0
+		// We use >= instead of == to handle floating point precision issues that can occur
+		// during JSON serialization/deserialization. The metric app emits 1.0 for healthy
+		// and 0.0 for unhealthy, so >= 1.0 safely distinguishes between the two states.
 		workloadMetrics := autoapprovev1alpha1.WorkloadMetrics{
 			WorkloadName: workloadName,
 			Namespace:    namespace,
-			Health:       health > 0.5, // Convert float to bool: healthy if > 0.5
+			Health:       health >= 1.0,
 		}
 		collectedMetrics = append(collectedMetrics, workloadMetrics)
 	}

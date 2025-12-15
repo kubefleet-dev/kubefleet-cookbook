@@ -32,7 +32,7 @@ import (
 
 // PrometheusClient is the interface for querying Prometheus
 type PrometheusClient interface {
-	Query(ctx context.Context, query string) (interface{}, error)
+	Query(ctx context.Context, query string) (PrometheusData, error)
 }
 
 // prometheusClient implements PrometheusClient for querying Prometheus API
@@ -56,7 +56,7 @@ func NewPrometheusClient(baseURL, authType string, authSecret *corev1.Secret) Pr
 }
 
 // Query executes a PromQL query against Prometheus API
-func (c *prometheusClient) Query(ctx context.Context, query string) (interface{}, error) {
+func (c *prometheusClient) Query(ctx context.Context, query string) (PrometheusData, error) {
 	// Build query URL
 	queryURL := fmt.Sprintf("%s/api/v1/query", strings.TrimSuffix(c.baseURL, "/"))
 	params := url.Values{}
@@ -66,34 +66,34 @@ func (c *prometheusClient) Query(ctx context.Context, query string) (interface{}
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return PrometheusData{}, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	// Add authentication
 	if err := c.addAuth(req); err != nil {
-		return nil, fmt.Errorf("failed to add authentication: %w", err)
+		return PrometheusData{}, fmt.Errorf("failed to add authentication: %w", err)
 	}
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query Prometheus: %w", err)
+		return PrometheusData{}, fmt.Errorf("failed to query Prometheus: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Prometheus query failed with status %d: %s", resp.StatusCode, string(body))
+		return PrometheusData{}, fmt.Errorf("Prometheus query failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Parse response
 	var result PrometheusResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		return PrometheusData{}, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	if result.Status != "success" {
-		return nil, fmt.Errorf("Prometheus query failed: %s", result.Error)
+		return PrometheusData{}, fmt.Errorf("Prometheus query failed: %s", result.Error)
 	}
 
 	return result.Data, nil
