@@ -349,13 +349,26 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 			found := false
 			healthy := false
 
+			// Important: Simplified health check using first matching metric
+			// When a workload has multiple pods/replicas, the MetricCollectorReport will contain
+			// multiple WorkloadMetrics entries (one per pod). This implementation uses the FIRST
+			// matching metric to determine workload health.
+			//
+			// Limitation: If different pods report different health states, only the first one
+			// encountered is used for approval decisions.
+			//
+			// To implement aggregation logic (e.g., all pods must be healthy, or majority healthy):
+			// 1. Remove the 'break' statement below
+			// 2. Collect all matching metrics into a slice
+			// 3. Apply your aggregation logic (e.g., allHealthy := all metrics have Health==true)
+			// 4. Set 'healthy' based on the aggregated result
 			for _, collectedMetric := range report.Status.CollectedMetrics {
 				if collectedMetric.Namespace == trackedWorkload.Namespace &&
 					collectedMetric.WorkloadName == trackedWorkload.Name {
 					found = true
 					healthy = collectedMetric.Health
 					klog.V(2).InfoS("Workload metric found", "approvalRequest", approvalReqRef, "cluster", clusterName, "workload", trackedWorkload.Name, "namespace", trackedWorkload.Namespace, "healthy", healthy)
-					break
+					break // Remove this to collect all metrics for aggregation
 				}
 			}
 

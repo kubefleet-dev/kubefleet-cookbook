@@ -57,8 +57,28 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
      - Queries local Prometheus using URL from report spec with PromQL: `workload_health`
      - Prometheus returns metrics for all pods with `prometheus.io/scrape: "true"` annotation
      - Extracts workload health (1.0 = healthy, 0.0 = unhealthy)
-     - Updates the `MetricCollectorReport` status on hub with collected metrics
+     - Updates the `MetricCollectorReport` status on hub with **all** collected metrics
    
+   **Important Note on Multiple Pods:** When a workload (e.g., a Deployment) has multiple pods/replicas emitting health signals:
+   - The metric collector **collects all metrics** from Prometheus and stores them in the MetricCollectorReport
+   - If `sample-metric-app` has 3 replicas, the report will contain 3 separate `WorkloadMetrics` entries
+   - However, for simplicity, the approval-request-controller only evaluates the **first matching metric** when checking workload health
+   - This means if the first pod reports healthy, the workload is considered healthy, even if other pods report differently
+   - This simplified approach works well when all pods of a workload consistently report the same health status
+   - **Limitation:** If pods have different health states, only the first metric encountered is used for approval decisions
+   
+   **Customizing Health Aggregation Logic:**
+   To implement more sophisticated health checks (e.g., all pods must be healthy, or majority healthy):
+   1. Edit `pkg/controllers/approvalrequest/controller.go` in the approval-request-controller
+   2. Locate the health check loop (search for "Simplified health check using first matching metric")
+   3. Remove the `break` statement that stops at the first match
+   4. Collect all matching metrics for the workload into a slice
+   5. Implement your aggregation logic:
+      - **All healthy:** Check that every metric has `Health == true`
+      - **Majority healthy:** Count healthy metrics and compare to total
+      - **Threshold-based:** Require N out of M pods to be healthy
+   6. Rebuild and redeploy the approval-request-controller image
+
 4. **Health Evaluation**
    - Approval-request-controller monitors `MetricCollectorReports` from all stage clusters
    - Every 15 seconds, it:
