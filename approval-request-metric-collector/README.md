@@ -133,6 +133,8 @@ az acr update --name myfleetacr --anonymous-pull-enabled
 
 From the `az acr create` output, note down the login server (e.g., `myfleetacr.azurecr.io`).
 
+> Note: Users can also create their own registry to push their docker images, it doesn't have to be ACR.
+
 ### 2. Build and Push Images
 
 Export registry and tag variables:
@@ -334,6 +336,10 @@ Before starting this tutorial, ensure you have:
 - Three member clusters joined to the hub cluster
 - kubectl configured with access to the hub cluster context
 
+This can be achieved through a number of ways,
+- https://kubefleet.dev/docs/getting-started/
+- https://learn.microsoft.com/en-us/azure/kubernetes-fleet/quickstart-create-fleet-and-members-portal
+
 ### 1. Label Member Clusters for Staged Rollout
 
 The staged rollout uses labels to determine which clusters belong to each stage. Ensure your member clusters have the following labels:
@@ -387,27 +393,9 @@ Create the test namespace and deploy the sample application:
 # Create test namespace
 kubectl create ns test-ns
 
-# Deploy sample metric app
-# This creates a Deployment with a simple Go app that exposes a /metrics endpoint
-# The app reports workload_health=1.0 (healthy) by default
-# Note: Update the image reference in the YAML to use your ACR registry
-# Change "image: metric-app:local" to "image: ${REGISTRY}/metric-app:latest"
-# You can use sed to update it:
-sed "s|image: metric-app:local|image: ${REGISTRY}/metric-app:latest|" \
-  ./examples/sample-metric-app/sample-metric-app.yaml | kubectl apply -f -
-```
-
-**Alternative:** Manually edit `./examples/sample-metric-app/sample-metric-app.yaml` to change:
-```yaml
-image: metric-app:local
-imagePullPolicy: IfNotPresent
-```
-to:
-```yaml
-image: myfleetacr.azurecr.io/metric-app:latest
-imagePullPolicy: Always
-```
 Then apply: `kubectl apply -f ./examples/sample-metric-app/`
+
+> Note: If users are using a different REGISTRY, TAG variables from the setup, please update examples/sample-metric-app/sample-metric-app.yaml accordingly.
 
 ### 4. Install Approval Request Controller (Hub Cluster)
 

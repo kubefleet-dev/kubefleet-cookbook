@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
       - name: metric-app
-        image: metric-app:local
-        imagePullPolicy: IfNotPresent
+        image: myfleetacr.azurecr.io/metric-app:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 8080
