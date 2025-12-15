@@ -144,37 +144,23 @@ export TAG="latest"
 cd approval-request-metric-collector
 ```
 
-Build and push the approval-request-controller image:
+Build and push all images at once:
 
 ```bash
-docker buildx build \
-  --file docker/approval-request-controller.Dockerfile \
-  --tag ${REGISTRY}/approval-request-controller:${TAG} \
-  --platform=linux/amd64 \
-  --push \
-  .
+make docker-build-all
 ```
 
-Build and push the metric-collector image:
+Or build individual images:
 
 ```bash
-docker buildx build \
-  --file docker/metric-collector.Dockerfile \
-  --tag ${REGISTRY}/metric-collector:${TAG} \
-  --platform=linux/amd64 \
-  --push \
-  .
-```
+# Build and push approval-request-controller image
+make docker-build-approval-controller
 
-Build and push the metric-app image:
+# Build and push metric-collector image
+make docker-build-metric-collector
 
-```bash
-docker buildx build \
-  --file docker/metric-app.Dockerfile \
-  --tag ${REGISTRY}/metric-app:${TAG} \
-  --platform=linux/amd64 \
-  --push \
-  .
+# Build and push metric-app image
+make docker-build-metric-app
 ```
 
 ### 3. Verify Images in ACR

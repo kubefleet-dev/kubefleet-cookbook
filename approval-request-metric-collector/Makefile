@@ -1,9 +1,8 @@
-# Makefile for ApprovalRequest Controller
+# Makefile for ApprovalRequest Controller and Metric Collector
 
 # Image settings
-IMAGE_NAME ?= approval-request-controller
-IMAGE_TAG ?= latest
 REGISTRY ?=
+TAG ?= latest
 
 # Build settings
 GOOS ?= $(shell go env GOOS)
@@ -29,19 +28,41 @@ generate: ## Generate DeepCopy code
 
 ##@ Build
 
-.PHONY: docker-build
-docker-build: ## Build docker image
+.PHONY: docker-build-approval-controller
+docker-build-approval-controller: ## Build approval-request-controller docker image
 	docker buildx build \
 		--file docker/approval-request-controller.Dockerfile \
-		--output=type=docker \
+		--tag $(REGISTRY)/approval-request-controller:$(TAG) \
 		--platform=linux/$(GOARCH) \
 		--build-arg GOARCH=$(GOARCH) \
-		--tag $(IMAGE_NAME):$(IMAGE_TAG) \
+		--push \
 		.
 
-.PHONY: docker-push
-docker-push: ## Push docker image
-	docker push $(REGISTRY)$(IMAGE_NAME):$(IMAGE_TAG)
+.PHONY: docker-build-metric-collector
+docker-build-metric-collector: ## Build metric-collector docker image
+	docker buildx build \
+		--file docker/metric-collector.Dockerfile \
+		--tag $(REGISTRY)/metric-collector:$(TAG) \
+		--platform=linux/$(GOARCH) \
+		--build-arg GOARCH=$(GOARCH) \
+		--push \
+		.
+
+.PHONY: docker-build-metric-app
+docker-build-metric-app: ## Build metric-app docker image
+	docker buildx build \
+		--file docker/metric-app.Dockerfile \
+		--tag $(REGISTRY)/metric-app:$(TAG) \
+		--platform=linux/$(GOARCH) \
+		--build-arg GOARCH=$(GOARCH) \
+		--push \
+		.
+
+.PHONY: docker-build-all
+docker-build-all: docker-build-approval-controller docker-build-metric-collector docker-build-metric-app ## Build and push all docker images
+
+.PHONY: docker-build
+docker-build: docker-build-all ## Alias for docker-build-all
 
 ##@ Development
 
@@ -51,27 +72,68 @@ run: ## Run controller locally
 
 ##@ Deployment
 
-.PHONY: install
-install: ## Install helm chart
+.PHONY: install-approval-controller
+install-approval-controller: ## Install approval-request-controller helm chart
 	helm install approval-request-controller ./charts/approval-request-controller \
 		--namespace fleet-system \
 		--create-namespace \
-		--set image.repository=$(IMAGE_NAME) \
-		--set image.tag=$(IMAGE_TAG)
+		--set image.repository=$(REGISTRY)/approval-request-controller \
+		--set image.tag=$(TAG)
 
-.PHONY: upgrade
-upgrade: ## Upgrade helm chart
+.PHONY: upgrade-approval-controller
+upgrade-approval-controller: ## Upgrade approval-request-controller helm chart
 	helm upgrade approval-request-controller ./charts/approval-request-controller \
 		--namespace fleet-system \
-		--set image.repository=$(IMAGE_NAME) \
-		--set image.tag=$(IMAGE_TAG)
+		--set image.repository=$(REGISTRY)/approval-request-controller \
+		--set image.tag=$(TAG)
+
+.PHONY: uninstall-approval-controller
+uninstall-approval-controller: ## Uninstall approval-request-controller helm chart
+	helm uninstall approval-request-controller --namespace fleet-system
+
+.PHONY: install
+install: install-approval-controller ## Alias for install-approval-controller
+
+.PHONY: upgrade
+upgrade: upgrade-approval-controller ## Alias for upgrade-approval-controller
 
 .PHONY: uninstall
-uninstall: ## Uninstall helm chart
-	helm uninstall approval-request-controller --namespace fleet-system
+uninstall: uninstall-approval-controller ## Alias for uninstall-approval-controller
 
 ##@ Kind
 
+.PHONY: kind-load-approval-controller
+kind-load-approval-controller: ## Build and load approval-request-controller image into kind cluster
+	docker buildx build \
+		--file docker/approval-request-controller.Dockerfile \
+		--tag approval-request-controller:$(TAG) \
+		--output=type=docker \
+		--platform=linux/$(GOARCH) \
+		--build-arg GOARCH=$(GOARCH) \
+		.
+	kind load docker-image approval-request-controller:$(TAG) --name hub
+
+.PHONY: kind-load-metric-collector
+kind-load-metric-collector: ## Build and load metric-collector image into kind cluster
+	docker buildx build \
+		--file docker/metric-collector.Dockerfile \
+		--tag metric-collector:$(TAG) \
+		--output=type=docker \
+		--platform=linux/$(GOARCH) \
+		--build-arg GOARCH=$(GOARCH) \
+		.
+	kind load docker-image metric-collector:$(TAG) --name hub
+
+.PHONY: kind-load-metric-app
+kind-load-metric-app: ## Build and load metric-app image into kind cluster
+	docker buildx build \
+		--file docker/metric-app.Dockerfile \
+		--tag metric-app:$(TAG) \
+		--output=type=docker \
+		--platform=linux/$(GOARCH) \
+		--build-arg GOARCH=$(GOARCH) \
+		.
+	kind load docker-image metric-app:$(TAG) --name hub
+
 .PHONY: kind-load
-kind-load: docker-build ## Build and load image into kind cluster
-	kind load docker-image $(IMAGE_NAME):$(IMAGE_TAG) --name hub
+kind-load: kind-load-approval-controller kind-load-metric-collector kind-load-metric-app ## Build and load all images into kind cluster
