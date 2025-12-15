@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	localv1alpha1 "github.com/kubefleet-dev/kubefleet-cookbook/approval-request-metric-collector/apis/autoapprove/v1alpha1"
+	autoapprovev1alpha1 "github.com/kubefleet-dev/kubefleet-cookbook/approval-request-metric-collector/apis/autoapprove/v1alpha1"
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 )
@@ -208,7 +208,7 @@ func (r *Reconciler) ensureMetricCollectorReports(
 	for _, clusterName := range clusterNames {
 		reportNamespace := fmt.Sprintf(utils.NamespaceNameFormat, clusterName)
 
-		report := &localv1alpha1.MetricCollectorReport{
+		report := &autoapprovev1alpha1.MetricCollectorReport{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      reportName,
 				Namespace: reportNamespace,
@@ -219,7 +219,7 @@ func (r *Reconciler) ensureMetricCollectorReports(
 					"cluster":          clusterName,
 				},
 			},
-			Spec: localv1alpha1.MetricCollectorReportSpec{
+			Spec: autoapprovev1alpha1.MetricCollectorReportSpec{
 				// PrometheusURL is a configurable spec field that could differ per cluster.
 				// For setup simplicity, we use a constant value pointing to the Prometheus service
 				// deployed via examples/prometheus/service.yaml and propagated to all clusters.
@@ -229,7 +229,7 @@ func (r *Reconciler) ensureMetricCollectorReports(
 		}
 
 		// Create or update MetricCollectorReport
-		existingReport := &localv1alpha1.MetricCollectorReport{}
+		existingReport := &autoapprovev1alpha1.MetricCollectorReport{}
 		err := r.Client.Get(ctx, types.NamespacedName{
 			Name:      reportName,
 			Namespace: reportNamespace,
@@ -274,12 +274,12 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 
 	// Get the appropriate WorkloadTracker based on scope
 	// The WorkloadTracker name matches the UpdateRun name
-	var workloads []localv1alpha1.WorkloadReference
+	var workloads []autoapprovev1alpha1.WorkloadReference
 	var workloadTrackerName string
 
 	if obj.GetNamespace() == "" {
 		// Cluster-scoped: Get ClusterStagedWorkloadTracker with same name as ClusterStagedUpdateRun
-		clusterWorkloadTracker := &localv1alpha1.ClusterStagedWorkloadTracker{}
+		clusterWorkloadTracker := &autoapprovev1alpha1.ClusterStagedWorkloadTracker{}
 		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName}, clusterWorkloadTracker); err != nil {
 			if errors.IsNotFound(err) {
 				klog.V(2).InfoS("ClusterStagedWorkloadTracker not found, skipping health check", "approvalRequest", approvalReqRef, "updateRun", updateRunName)
@@ -293,7 +293,7 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 		klog.V(2).InfoS("Found ClusterStagedWorkloadTracker", "approvalRequest", approvalReqRef, "workloadTracker", workloadTrackerName, "workloadCount", len(workloads))
 	} else {
 		// Namespace-scoped: Get StagedWorkloadTracker with same name and namespace as StagedUpdateRun
-		stagedWorkloadTracker := &localv1alpha1.StagedWorkloadTracker{}
+		stagedWorkloadTracker := &autoapprovev1alpha1.StagedWorkloadTracker{}
 		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName, Namespace: obj.GetNamespace()}, stagedWorkloadTracker); err != nil {
 			if errors.IsNotFound(err) {
 				klog.V(2).InfoS("StagedWorkloadTracker not found, skipping health check", "approvalRequest", approvalReqRef, "updateRun", updateRunName, "namespace", obj.GetNamespace())
@@ -325,7 +325,7 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 		klog.V(2).InfoS("Checking MetricCollectorReport", "approvalRequest", approvalReqRef, "cluster", clusterName, "reportName", metricCollectorName, "reportNamespace", reportNamespace)
 
 		// Get MetricCollectorReport for this cluster
-		report := &localv1alpha1.MetricCollectorReport{}
+		report := &autoapprovev1alpha1.MetricCollectorReport{}
 		err := r.Client.Get(ctx, types.NamespacedName{
 			Name:      metricCollectorName,
 			Namespace: reportNamespace,
@@ -486,7 +486,7 @@ func (r *Reconciler) handleDelete(ctx context.Context, approvalReqObj placementv
 	// Delete MetricCollectorReport from each fleet-member namespace
 	for _, clusterName := range clusterNames {
 		reportNamespace := fmt.Sprintf(utils.NamespaceNameFormat, clusterName)
-		report := &localv1alpha1.MetricCollectorReport{}
+		report := &autoapprovev1alpha1.MetricCollectorReport{}
 
 		if err := r.Client.Get(ctx, types.NamespacedName{
 			Name:      reportName,

@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	localv1alpha1 "github.com/kubefleet-dev/kubefleet-cookbook/approval-request-metric-collector/apis/autoapprove/v1alpha1"
+	autoapprovev1alpha1 "github.com/kubefleet-dev/kubefleet-cookbook/approval-request-metric-collector/apis/autoapprove/v1alpha1"
 )
 
 const (
@@ -54,7 +54,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}()
 
 	// 1. Get MetricCollectorReport from hub cluster
-	report := &localv1alpha1.MetricCollectorReport{}
+	report := &autoapprovev1alpha1.MetricCollectorReport{}
 	if err := r.HubClient.Get(ctx, req.NamespacedName, report); err != nil {
 		if errors.IsNotFound(err) {
 			klog.V(2).InfoS("MetricCollectorReport not found, ignoring", "report", req.NamespacedName)
@@ -82,19 +82,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if collectErr != nil {
 		klog.ErrorS(collectErr, "Failed to collect metrics", "prometheusUrl", prometheusURL)
 		meta.SetStatusCondition(&report.Status.Conditions, metav1.Condition{
-			Type:               localv1alpha1.MetricCollectorReportConditionTypeMetricsCollected,
+			Type:               autoapprovev1alpha1.MetricCollectorReportConditionTypeMetricsCollected,
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: report.Generation,
-			Reason:             localv1alpha1.MetricCollectorReportConditionReasonCollectionFailed,
+			Reason:             autoapprovev1alpha1.MetricCollectorReportConditionReasonCollectionFailed,
 			Message:            fmt.Sprintf("Failed to collect metrics: %v", collectErr),
 		})
 	} else {
 		klog.V(2).InfoS("Successfully collected metrics", "report", report.Name, "workloads", len(collectedMetrics))
 		meta.SetStatusCondition(&report.Status.Conditions, metav1.Condition{
-			Type:               localv1alpha1.MetricCollectorReportConditionTypeMetricsCollected,
+			Type:               autoapprovev1alpha1.MetricCollectorReportConditionTypeMetricsCollected,
 			Status:             metav1.ConditionTrue,
 			ObservedGeneration: report.Generation,
-			Reason:             localv1alpha1.MetricCollectorReportConditionReasonCollectionSucceeded,
+			Reason:             autoapprovev1alpha1.MetricCollectorReportConditionReasonCollectionSucceeded,
 			Message:            fmt.Sprintf("Successfully collected metrics from %d workloads", len(collectedMetrics)),
 		})
 	}
@@ -109,8 +109,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 // collectAllWorkloadMetrics queries Prometheus for all workload_health metrics
-func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient PrometheusClient) ([]localv1alpha1.WorkloadMetrics, error) {
-	var collectedMetrics []localv1alpha1.WorkloadMetrics
+func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient PrometheusClient) ([]autoapprovev1alpha1.WorkloadMetrics, error) {
+	var collectedMetrics []autoapprovev1alpha1.WorkloadMetrics
 
 	// Query all workload_health metrics (no filtering)
 	query := "workload_health"
@@ -157,7 +157,7 @@ func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient P
 			}
 		}
 
-		workloadMetrics := localv1alpha1.WorkloadMetrics{
+		workloadMetrics := autoapprovev1alpha1.WorkloadMetrics{
 			WorkloadName: workloadName,
 			Namespace:    namespace,
 			Health:       health > 0.5, // Convert float to bool: healthy if > 0.5
@@ -173,6 +173,6 @@ func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient P
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("metriccollector-controller").
-		For(&localv1alpha1.MetricCollectorReport{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&autoapprovev1alpha1.MetricCollectorReport{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }

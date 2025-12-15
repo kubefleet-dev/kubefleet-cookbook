@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	placementv1alpha1 "github.com/kubefleet-dev/kubefleet-cookbook/approval-request-metric-collector/apis/autoapprove/v1alpha1"
+	autoapprovev1alpha1 "github.com/kubefleet-dev/kubefleet-cookbook/approval-request-metric-collector/apis/autoapprove/v1alpha1"
 	metriccollector "github.com/kubefleet-dev/kubefleet-cookbook/approval-request-metric-collector/pkg/controllers/metriccollector"
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 )
@@ -183,8 +183,8 @@ func Start(ctx context.Context, hubCfg *rest.Config, memberClusterName, hubNames
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		return fmt.Errorf("failed to add client-go scheme: %w", err)
 	}
-	if err := placementv1alpha1.AddToScheme(scheme); err != nil {
-		return fmt.Errorf("failed to add placement v1alpha1 API to scheme: %w", err)
+	if err := autoapprovev1alpha1.AddToScheme(scheme); err != nil {
+		return fmt.Errorf("failed to add autoapprove v1alpha1 API to scheme: %w", err)
 	}
 	if err := placementv1beta1.AddToScheme(scheme); err != nil {
 		return fmt.Errorf("failed to add placement v1beta1 API to scheme: %w", err)
