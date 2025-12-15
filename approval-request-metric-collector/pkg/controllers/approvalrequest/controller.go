@@ -225,6 +225,10 @@ func (r *Reconciler) ensureMetricCollectorReports(
 				},
 			},
 			Spec: localv1alpha1.MetricCollectorReportSpec{
+				// PrometheusURL is a configurable spec field that could differ per cluster.
+				// For setup simplicity, we use a constant value pointing to the Prometheus service
+				// deployed via examples/prometheus/service.yaml and propagated to all clusters.
+				// This assumes Prometheus is deployed with the same service name/namespace on all member clusters.
 				PrometheusURL: prometheusURL,
 			},
 		}
@@ -241,10 +245,7 @@ func (r *Reconciler) ensureMetricCollectorReports(
 				if err := r.Client.Create(ctx, report); err != nil {
 					return fmt.Errorf("failed to create MetricCollectorReport in %s: %w", reportNamespace, err)
 				}
-				klog.V(2).InfoS("Created MetricCollectorReport",
-					"report", reportName,
-					"namespace", reportNamespace,
-					"cluster", clusterName)
+				klog.V(2).InfoS("Created MetricCollectorReport", "report", reportName, "namespace", reportNamespace, "cluster", clusterName)
 			} else {
 				return fmt.Errorf("failed to get MetricCollectorReport in %s: %w", reportNamespace, err)
 			}
@@ -255,10 +256,7 @@ func (r *Reconciler) ensureMetricCollectorReports(
 				if err := r.Client.Update(ctx, existingReport); err != nil {
 					return fmt.Errorf("failed to update MetricCollectorReport in %s: %w", reportNamespace, err)
 				}
-				klog.V(2).InfoS("Updated MetricCollectorReport",
-					"report", reportName,
-					"namespace", reportNamespace,
-					"cluster", clusterName)
+				klog.V(2).InfoS("Updated MetricCollectorReport", "report", reportName, "namespace", reportNamespace, "cluster", clusterName)
 			}
 		}
 	}
@@ -289,9 +287,7 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 		clusterWorkloadTracker := &localv1alpha1.ClusterStagedWorkloadTracker{}
 		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName}, clusterWorkloadTracker); err != nil {
 			if errors.IsNotFound(err) {
-				klog.V(2).InfoS("ClusterStagedWorkloadTracker not found, skipping health check",
-					"approvalRequest", approvalReqRef,
-					"updateRun", updateRunName)
+				klog.V(2).InfoS("ClusterStagedWorkloadTracker not found, skipping health check", "approvalRequest", approvalReqRef, "updateRun", updateRunName)
 				return nil
 			}
 			klog.ErrorS(err, "Failed to get ClusterStagedWorkloadTracker", "approvalRequest", approvalReqRef, "updateRun", updateRunName)
@@ -299,19 +295,13 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 		}
 		workloads = clusterWorkloadTracker.Workloads
 		workloadTrackerName = clusterWorkloadTracker.Name
-		klog.V(2).InfoS("Found ClusterStagedWorkloadTracker",
-			"approvalRequest", approvalReqRef,
-			"workloadTracker", workloadTrackerName,
-			"workloadCount", len(workloads))
+		klog.V(2).InfoS("Found ClusterStagedWorkloadTracker", "approvalRequest", approvalReqRef, "workloadTracker", workloadTrackerName, "workloadCount", len(workloads))
 	} else {
 		// Namespace-scoped: Get StagedWorkloadTracker with same name and namespace as StagedUpdateRun
 		stagedWorkloadTracker := &localv1alpha1.StagedWorkloadTracker{}
 		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName, Namespace: obj.GetNamespace()}, stagedWorkloadTracker); err != nil {
 			if errors.IsNotFound(err) {
-				klog.V(2).InfoS("StagedWorkloadTracker not found, skipping health check",
-					"approvalRequest", approvalReqRef,
-					"updateRun", updateRunName,
-					"namespace", obj.GetNamespace())
+				klog.V(2).InfoS("StagedWorkloadTracker not found, skipping health check", "approvalRequest", approvalReqRef, "updateRun", updateRunName, "namespace", obj.GetNamespace())
 				return nil
 			}
 			klog.ErrorS(err, "Failed to get StagedWorkloadTracker", "approvalRequest", approvalReqRef, "updateRun", updateRunName)
@@ -319,16 +309,11 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 		}
 		workloads = stagedWorkloadTracker.Workloads
 		workloadTrackerName = stagedWorkloadTracker.Name
-		klog.V(2).InfoS("Found StagedWorkloadTracker",
-			"approvalRequest", approvalReqRef,
-			"workloadTracker", klog.KObj(stagedWorkloadTracker),
-			"workloadCount", len(workloads))
+		klog.V(2).InfoS("Found StagedWorkloadTracker", "approvalRequest", approvalReqRef, "workloadTracker", klog.KObj(stagedWorkloadTracker), "workloadCount", len(workloads))
 	}
 
 	if len(workloads) == 0 {
-		klog.V(2).InfoS("WorkloadTracker has no workloads defined, skipping health check",
-			"approvalRequest", approvalReqRef,
-			"workloadTracker", workloadTrackerName)
+		klog.V(2).InfoS("WorkloadTracker has no workloads defined, skipping health check", "approvalRequest", approvalReqRef, "workloadTracker", workloadTrackerName)
 		return nil
 	}
 
@@ -342,11 +327,7 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 	for _, clusterName := range clusterNames {
 		reportNamespace := fmt.Sprintf(utils.NamespaceNameFormat, clusterName)
 
-		klog.V(2).InfoS("Checking MetricCollectorReport",
-			"approvalRequest", approvalReqRef,
-			"cluster", clusterName,
-			"reportName", metricCollectorName,
-			"reportNamespace", reportNamespace)
+		klog.V(2).InfoS("Checking MetricCollectorReport", "approvalRequest", approvalReqRef, "cluster", clusterName, "reportName", metricCollectorName, "reportNamespace", reportNamespace)
 
 		// Get MetricCollectorReport for this cluster
 		report := &localv1alpha1.MetricCollectorReport{}
@@ -357,28 +338,16 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 
 		if err != nil {
 			if errors.IsNotFound(err) {
-				klog.V(2).InfoS("MetricCollectorReport not found yet",
-					"approvalRequest", approvalReqRef,
-					"cluster", clusterName,
-					"report", metricCollectorName,
-					"namespace", reportNamespace)
+				klog.V(2).InfoS("MetricCollectorReport not found yet", "approvalRequest", approvalReqRef, "cluster", clusterName, "report", metricCollectorName, "namespace", reportNamespace)
 				allHealthy = false
 				unhealthyDetails = append(unhealthyDetails, fmt.Sprintf("cluster %s: report not found", clusterName))
 				continue
 			}
-			klog.ErrorS(err, "Failed to get MetricCollectorReport",
-				"approvalRequest", approvalReqRef,
-				"cluster", clusterName,
-				"report", metricCollectorName,
-				"namespace", reportNamespace)
+			klog.ErrorS(err, "Failed to get MetricCollectorReport", "approvalRequest", approvalReqRef, "cluster", clusterName, "report", metricCollectorName, "namespace", reportNamespace)
 			return fmt.Errorf("failed to get MetricCollectorReport for cluster %s: %w", clusterName, err)
 		}
 
-		klog.V(2).InfoS("Found MetricCollectorReport",
-			"approvalRequest", approvalReqRef,
-			"cluster", clusterName,
-			"collectedMetrics", len(report.Status.CollectedMetrics),
-			"workloadsMonitored", report.Status.WorkloadsMonitored)
+		klog.V(2).InfoS("Found MetricCollectorReport", "approvalRequest", approvalReqRef, "cluster", clusterName, "collectedMetrics", len(report.Status.CollectedMetrics), "workloadsMonitored", report.Status.WorkloadsMonitored)
 
 		// Check if all workloads from WorkloadTracker are present and healthy
 		for _, trackedWorkload := range workloads {
@@ -390,31 +359,18 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 					collectedMetric.WorkloadName == trackedWorkload.Name {
 					found = true
 					healthy = collectedMetric.Health
-					klog.V(3).InfoS("Workload metric found",
-						"approvalRequest", approvalReqRef,
-						"cluster", clusterName,
-						"workload", trackedWorkload.Name,
-						"namespace", trackedWorkload.Namespace,
-						"healthy", healthy)
+					klog.V(2).InfoS("Workload metric found", "approvalRequest", approvalReqRef, "cluster", clusterName, "workload", trackedWorkload.Name, "namespace", trackedWorkload.Namespace, "healthy", healthy)
 					break
 				}
 			}
 
 			if !found {
-				klog.V(2).InfoS("Workload not found in MetricCollectorReport",
-					"approvalRequest", approvalReqRef,
-					"cluster", clusterName,
-					"workload", trackedWorkload.Name,
-					"namespace", trackedWorkload.Namespace)
+				klog.V(2).InfoS("Workload not found in MetricCollectorReport", "approvalRequest", approvalReqRef, "cluster", clusterName, "workload", trackedWorkload.Name, "namespace", trackedWorkload.Namespace)
 				allHealthy = false
 				unhealthyDetails = append(unhealthyDetails,
 					fmt.Sprintf("cluster %s: workload %s/%s not found", clusterName, trackedWorkload.Namespace, trackedWorkload.Name))
 			} else if !healthy {
-				klog.V(2).InfoS("Workload is not healthy",
-					"approvalRequest", approvalReqRef,
-					"cluster", clusterName,
-					"workload", trackedWorkload.Name,
-					"namespace", trackedWorkload.Namespace)
+				klog.V(2).InfoS("Workload is not healthy", "approvalRequest", approvalReqRef, "cluster", clusterName, "workload", trackedWorkload.Name, "namespace", trackedWorkload.Namespace)
 				allHealthy = false
 				unhealthyDetails = append(unhealthyDetails,
 					fmt.Sprintf("cluster %s: workload %s/%s unhealthy", clusterName, trackedWorkload.Namespace, trackedWorkload.Name))
@@ -424,10 +380,7 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 
 	// If all workloads are healthy across all clusters, approve the ApprovalRequest
 	if allHealthy {
-		klog.InfoS("All workloads are healthy, approving ApprovalRequest",
-			"approvalRequest", approvalReqRef,
-			"clusters", clusterNames,
-			"workloads", len(workloads))
+		klog.InfoS("All workloads are healthy, approving ApprovalRequest", "approvalRequest", approvalReqRef, "clusters", clusterNames, "workloads", len(workloads))
 
 		status := approvalReqObj.GetApprovalRequestStatus()
 		approvedCond := meta.FindStatusCondition(status.Conditions, string(placementv1beta1.ApprovalRequestConditionApproved))
@@ -459,9 +412,7 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 	}
 
 	// Not all workloads are healthy yet, log details and return nil (reconcile will requeue)
-	klog.V(2).InfoS("Not all workloads are healthy yet",
-		"approvalRequest", approvalReqRef,
-		"unhealthyDetails", unhealthyDetails)
+	klog.V(2).InfoS("Not all workloads are healthy yet", "approvalRequest", approvalReqRef, "unhealthyDetails", unhealthyDetails)
 
 	return nil
 }
@@ -534,16 +485,10 @@ func (r *Reconciler) handleDelete(ctx context.Context, approvalReqObj placementv
 			Namespace: reportNamespace,
 		}, report); err == nil {
 			if err := r.Client.Delete(ctx, report); err != nil && !errors.IsNotFound(err) {
-				klog.ErrorS(err, "Failed to delete MetricCollectorReport",
-					"report", reportName,
-					"namespace", reportNamespace,
-					"cluster", clusterName)
+				klog.ErrorS(err, "Failed to delete MetricCollectorReport", "report", reportName, "namespace", reportNamespace, "cluster", clusterName)
 				return ctrl.Result{}, fmt.Errorf("failed to delete MetricCollectorReport in %s: %w", reportNamespace, err)
 			}
-			klog.V(2).InfoS("Deleted MetricCollectorReport",
-				"report", reportName,
-				"namespace", reportNamespace,
-				"cluster", clusterName)
+			klog.V(2).InfoS("Deleted MetricCollectorReport", "report", reportName, "namespace", reportNamespace, "cluster", clusterName)
 		}
 	}
 

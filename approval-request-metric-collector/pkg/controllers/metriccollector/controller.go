@@ -82,19 +82,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if collectErr != nil {
 		klog.ErrorS(collectErr, "Failed to collect metrics", "prometheusUrl", prometheusURL)
 		meta.SetStatusCondition(&report.Status.Conditions, metav1.Condition{
-			Type:               "MetricsCollected",
+			Type:               localv1alpha1.MetricCollectorReportConditionTypeMetricsCollected,
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: report.Generation,
-			Reason:             "CollectionFailed",
+			Reason:             localv1alpha1.MetricCollectorReportConditionReasonCollectionFailed,
 			Message:            fmt.Sprintf("Failed to collect metrics: %v", collectErr),
 		})
 	} else {
 		klog.V(2).InfoS("Successfully collected metrics", "report", report.Name, "workloads", len(collectedMetrics))
 		meta.SetStatusCondition(&report.Status.Conditions, metav1.Condition{
-			Type:               "MetricsCollected",
+			Type:               localv1alpha1.MetricCollectorReportConditionTypeMetricsCollected,
 			Status:             metav1.ConditionTrue,
 			ObservedGeneration: report.Generation,
-			Reason:             "MetricsCollected",
+			Reason:             localv1alpha1.MetricCollectorReportConditionReasonCollectionSucceeded,
 			Message:            fmt.Sprintf("Successfully collected metrics from %d workloads", len(collectedMetrics)),
 		})
 	}
@@ -134,6 +134,12 @@ func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient P
 
 	// Extract metrics from Prometheus result
 	for _, res := range data.Result {
+		// Extract labels from the Prometheus metric
+		// The workload_health metric includes labels like: workload_health{namespace="test-ns",app="sample-app"}
+		// These labels come from Kubernetes pod labels and are added by Prometheus during scraping.
+		// The relabeling configuration is in examples/prometheus/configmap.yaml:
+		//   - namespace: from __meta_kubernetes_namespace (pod's namespace)
+		//   - app: from __meta_kubernetes_pod_label_app (pod's "app" label)
 		namespace := res.Metric["namespace"]
 		workloadName := res.Metric["app"]
 

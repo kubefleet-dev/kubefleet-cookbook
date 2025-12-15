@@ -8,4 +8,3 @@ spec:
   resourceSnapshotIndex: "0"
   stagedRolloutStrategyName: example-staged-strategy
   state: Started
-  

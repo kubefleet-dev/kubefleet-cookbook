@@ -20,6 +20,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	// MetricCollectorReportConditionTypeMetricsCollected indicates whether metrics have been successfully collected
+	MetricCollectorReportConditionTypeMetricsCollected = "MetricsCollected"
+
+	// MetricCollectorReportConditionReasonCollectionFailed indicates metric collection failed
+	MetricCollectorReportConditionReasonCollectionFailed = "CollectionFailed"
+
+	// MetricCollectorReportConditionReasonCollectionSucceeded indicates metric collection succeeded
+	MetricCollectorReportConditionReasonCollectionSucceeded = "CollectionSucceeded"
+)
+
 // +genclient
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status

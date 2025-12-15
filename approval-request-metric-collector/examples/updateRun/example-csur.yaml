@@ -7,4 +7,3 @@ spec:
   resourceSnapshotIndex: "0"
   stagedRolloutStrategyName: example-cluster-staged-strategy
   state: Started
-  
