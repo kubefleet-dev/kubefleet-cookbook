@@ -336,42 +336,24 @@ Before starting this tutorial, ensure you have:
 
 ### 1. Label Member Clusters for Staged Rollout
 
-The staged rollout uses labels to determine which clusters belong to each stage. Label your three member clusters appropriately:
+The staged rollout uses labels to determine which clusters belong to each stage. Ensure your member clusters have the following labels:
 
-```bash
-# Switch to hub cluster context
-kubectl config use-context <hub-context>
+**Stage 1 (staging)** - One cluster:
+- `environment=staging`
 
-# Label the first cluster for staging (Stage 1)
-# Replace <cluster-1-name> with your actual cluster name (e.g., kind-cluster-1, aks-cluster-1, etc.)
-kubectl label membercluster <cluster-1-name> environment=staging --overwrite
-kubectl label membercluster <cluster-1-name> kubernetes-fleet.io/cluster-name=<cluster-1-name> --overwrite
+**Stage 2 (prod)** - Two or more clusters:
+- `environment=prod`
 
-# Label the second cluster for production (Stage 2)
-# Replace <cluster-2-name> with your actual cluster name
-kubectl label membercluster <cluster-2-name> environment=prod --overwrite
-kubectl label membercluster <cluster-2-name> kubernetes-fleet.io/cluster-name=<cluster-2-name> --overwrite
-
-# Label the third cluster for production (Stage 2)
-# Replace <cluster-3-name> with your actual cluster name
-kubectl label membercluster <cluster-3-name> environment=prod --overwrite
-kubectl label membercluster <cluster-3-name> kubernetes-fleet.io/cluster-name=<cluster-3-name> --overwrite
-
-# Verify the labels are applied
-kubectl get membercluster --show-labels
+Expected cluster configuration:
+```
+cluster-1: environment=staging
+cluster-2: environment=prod
+cluster-3: environment=prod
 ```
 
-Expected output:
-```bash
-NAME          JOINED   AGE   LABELS
-cluster-1     True     5m    environment=staging,kubernetes-fleet.io/cluster-name=cluster-1,...
-cluster-2     True     5m    environment=prod,kubernetes-fleet.io/cluster-name=cluster-2,...
-cluster-3     True     5m    environment=prod,kubernetes-fleet.io/cluster-name=cluster-3,...
-```
-
-These labels are used by the `StagedUpdateStrategy` to select clusters for each stage:
-- **Stage 1 (staging)**: Selects clusters with `environment=staging` → cluster-1
-- **Stage 2 (prod)**: Selects clusters with `environment=prod` → cluster-2 and cluster-3
+The `StagedUpdateStrategy` uses these labels to select clusters for each stage:
+- **Stage 1 (staging)**: Selects clusters with `environment=staging`
+- **Stage 2 (prod)**: Selects clusters with `environment=prod`
 
 ### 2. Deploy Prometheus
 
