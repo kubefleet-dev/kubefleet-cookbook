@@ -420,7 +420,6 @@ image: myfleetacr.azurecr.io/metric-app:latest
 imagePullPolicy: Always
 ```
 Then apply: `kubectl apply -f ./examples/sample-metric-app/`
-```
 
 ### 4. Install Approval Request Controller (Hub Cluster)
 
@@ -430,8 +429,10 @@ Install the approval request controller on the hub cluster using the ACR registr
 # Set your ACR registry name
 export REGISTRY="myfleetacr.azurecr.io"
 
-# Run the installation script
+# Navigate to scripts directory and run the installation script
+cd scripts
 ./install-on-hub.sh ${REGISTRY} <HUB_CONTEXT>
+cd ..
 ```
 
 The script performs the following:
@@ -466,27 +467,20 @@ kubectl apply -f ./examples/workloadtracker/stagedworkloadtracker.yaml
 Install the metric collector on all member clusters using the ACR registry:
 
 ```bash
-cd ../metric-collector
+# Navigate to scripts directory
+cd scripts
 
 # Run the installation script for all member clusters
 # Replace <hub-cluster-name> with your hub cluster name (e.g., kind-hub, hub)
 # Replace <cluster-1-name>, <cluster-2-name>, <cluster-3-name> with your actual cluster names
 ./install-on-member.sh ${REGISTRY} <hub-cluster-name> <cluster-1-name> <cluster-2-name> <cluster-3-name>
-The script performs the following for each member cluster:
-1. Verifies the `fleet-member-<cluster-name>` namespace exists on the hub (created by KubeFleet)
-2. Creates RBAC resources (ServiceAccount, Role, RoleBinding) in the fleet-member namespace on the hub
-3. Creates a token secret for hub cluster authentication
-4. Installs the metric-collector via Helm on each member cluster
-5. Configures the collector to pull images from ACR and connect to hub API server and local Prometheus
 
-**Note:** The script expects the `fleet-member-<cluster-name>` namespaces to already exist on the hub cluster. These are automatically created by KubeFleet when member clusters join the hub. If you encounter errors about missing namespaces, ensure your member clusters are properly registered with the hub.
-./install-on-member.sh ${REGISTRY} kind-hub kind-cluster-1 kind-cluster-2 kind-cluster-3
+# Example:
+# ./install-on-member.sh ${REGISTRY} kind-hub kind-cluster-1 kind-cluster-2 kind-cluster-3
+
+# Return to parent directory
+cd ..
 ```
-
-The script performs the following for each member cluster:
-1. Pulls the `metric-collector` and `metric-app` images from your ACR
-2. Creates hub token secret with proper RBAC
-3. Installs the metric-collector via Helm
 4. Configures connection to hub API server and local Prometheus
 ```bash
 cd ../approval-request-controller
@@ -530,12 +524,6 @@ kubectl apply -f ./examples/updateRun/example-csur.yaml
 
 # Check the staged update run status
 kubectl get csur -A
-```
-```bash
-cd ../approval-request-controller
-
-# Switch to hub cluster context
-kubectl config use-context <hub-context>
 ```
 
 #### Option B: Namespace-Scoped Staged Update (StagedUpdateRun)

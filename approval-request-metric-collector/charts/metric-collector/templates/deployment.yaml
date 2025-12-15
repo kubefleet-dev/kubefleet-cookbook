@@ -36,13 +36,16 @@ spec:
           - /metric-collector
         args:
           - --v={{ .Values.controller.logLevel }}
-          - --member-qps=100
-          - --member-burst=200
           - --hub-qps=100
           - --hub-burst=200
           - --metrics-bind-address=:{{ .Values.metrics.port }}
           - --health-probe-bind-address=:{{ .Values.healthProbe.port }}
+          - --leader-elect=false
         env:
+          # Member cluster identity
+          - name: MEMBER_CLUSTER_NAME
+            value: {{ .Values.memberCluster.name | quote }}
+          
           # Hub cluster connection
           - name: HUB_SERVER_URL
             value: {{ .Values.hubCluster.url | quote }}

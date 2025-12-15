@@ -1,21 +1,27 @@
 # Build stage
-FROM golang:1.24-alpine AS builder
+FROM golang:1.24 AS builder
+
 WORKDIR /workspace
 
-# Initialize go module for metric-app
-RUN go mod init metric-app && \
-    go get github.com/prometheus/client_golang/prometheus@latest && \
-    go get github.com/prometheus/client_golang/prometheus/promhttp@latest
+# Copy go mod files
+COPY go.mod go.sum* ./
+RUN go mod download
 
 # Copy source code
-COPY cmd/metricapp/ ./
+COPY apis/ apis/
+COPY pkg/ pkg/
+COPY cmd/ cmd/
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o metric-app main.go
+ARG GOARCH=amd64
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${GOARCH} go build \
+    -a -o metric-app \
+    ./cmd/metricapp
 
-# Run stage
-FROM alpine:3.18
-WORKDIR /app
+# Runtime stage
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
 COPY --from=builder /workspace/metric-app .
-EXPOSE 8080
-CMD ["./metric-app"]
+USER 65532:65532
+
+ENTRYPOINT ["/metric-app"]
