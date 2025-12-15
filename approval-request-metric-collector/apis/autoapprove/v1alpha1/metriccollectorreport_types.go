@@ -86,13 +86,13 @@ type MetricCollectorReportStatus struct {
 	CollectedMetrics []WorkloadMetrics `json:"collectedMetrics,omitempty"`
 }
 
-// WorkloadMetrics represents metrics collected from a single workload pod.
+// WorkloadMetrics represents metrics collected from a single workload.
 type WorkloadMetrics struct {
 	// Namespace of the workload.
 	// +required
 	Namespace string `json:"namespace"`
 
-	// WorkloadName from the workload_health metric label.
+	// Name of the workload.
 	// +required
 	WorkloadName string `json:"workloadName"`
 

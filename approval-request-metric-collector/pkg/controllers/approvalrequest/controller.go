@@ -65,8 +65,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}()
 
 	var approvalReqObj placementv1beta1.ApprovalRequestObj
-	var isClusterScoped bool
-
 	// Check if request has a namespace to determine resource type
 	if req.Namespace != "" {
 		// Fetch namespaced ApprovalRequest
@@ -80,7 +78,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, err
 		}
 		approvalReqObj = approvalReq
-		isClusterScoped = false
 	} else {
 		// Fetch cluster-scoped ClusterApprovalRequest
 		clusterApprovalReq := &placementv1beta1.ClusterApprovalRequest{}
@@ -93,19 +90,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{}, err
 		}
 		approvalReqObj = clusterApprovalReq
-		isClusterScoped = true
 	}
 
-	return r.reconcileApprovalRequestObj(ctx, approvalReqObj, isClusterScoped)
+	return r.reconcileApprovalRequestObj(ctx, approvalReqObj)
 }
 
 // reconcileApprovalRequestObj reconciles an ApprovalRequestObj (either ApprovalRequest or ClusterApprovalRequest).
-func (r *Reconciler) reconcileApprovalRequestObj(ctx context.Context, approvalReqObj placementv1beta1.ApprovalRequestObj, isClusterScoped bool) (ctrl.Result, error) {
-	obj := approvalReqObj.(client.Object)
-	approvalReqRef := klog.KObj(obj)
+func (r *Reconciler) reconcileApprovalRequestObj(ctx context.Context, approvalReqObj placementv1beta1.ApprovalRequestObj) (ctrl.Result, error) {
+	approvalReqRef := klog.KObj(approvalReqObj)
 
 	// Handle deletion
-	if !obj.GetDeletionTimestamp().IsZero() {
+	if !approvalReqObj.GetDeletionTimestamp().IsZero() {
 		return r.handleDelete(ctx, approvalReqObj)
 	}
 
@@ -117,9 +112,9 @@ func (r *Reconciler) reconcileApprovalRequestObj(ctx context.Context, approvalRe
 	}
 
 	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(obj, metricCollectorFinalizer) {
-		controllerutil.AddFinalizer(obj, metricCollectorFinalizer)
-		if err := r.Client.Update(ctx, obj); err != nil {
+	if !controllerutil.ContainsFinalizer(approvalReqObj, metricCollectorFinalizer) {
+		controllerutil.AddFinalizer(approvalReqObj, metricCollectorFinalizer)
+		if err := r.Client.Update(ctx, approvalReqObj); err != nil {
 			klog.ErrorS(err, "Failed to add finalizer", "approvalRequest", approvalReqRef)
 			return ctrl.Result{}, err
 		}
@@ -132,7 +127,7 @@ func (r *Reconciler) reconcileApprovalRequestObj(ctx context.Context, approvalRe
 	stageName := spec.TargetStage
 
 	var stageStatus *placementv1beta1.StageUpdatingStatus
-	if isClusterScoped {
+	if approvalReqObj.GetNamespace() == "" {
 		updateRun := &placementv1beta1.ClusterStagedUpdateRun{}
 		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName}, updateRun); err != nil {
 			klog.ErrorS(err, "Failed to get ClusterStagedUpdateRun", "approvalRequest", approvalReqRef, "updateRun", updateRunName)
@@ -148,7 +143,7 @@ func (r *Reconciler) reconcileApprovalRequestObj(ctx context.Context, approvalRe
 		}
 	} else {
 		updateRun := &placementv1beta1.StagedUpdateRun{}
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName, Namespace: obj.GetNamespace()}, updateRun); err != nil {
+		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName, Namespace: approvalReqObj.GetNamespace()}, updateRun); err != nil {
 			klog.ErrorS(err, "Failed to get StagedUpdateRun", "approvalRequest", approvalReqRef, "updateRun", updateRunName)
 			return ctrl.Result{}, err
 		}
@@ -182,7 +177,7 @@ func (r *Reconciler) reconcileApprovalRequestObj(ctx context.Context, approvalRe
 	klog.V(2).InfoS("Found clusters in stage", "approvalRequest", approvalReqRef, "stage", stageName, "clusters", clusterNames)
 
 	// Create or update MetricCollectorReport resources in fleet-member namespaces
-	if err := r.ensureMetricCollectorReports(ctx, obj, clusterNames, updateRunName, stageName); err != nil {
+	if err := r.ensureMetricCollectorReports(ctx, approvalReqObj, clusterNames, updateRunName, stageName); err != nil {
 		klog.ErrorS(err, "Failed to ensure MetricCollectorReport resources", "approvalRequest", approvalReqRef)
 		return ctrl.Result{}, err
 	}
@@ -202,7 +197,7 @@ func (r *Reconciler) reconcileApprovalRequestObj(ctx context.Context, approvalRe
 // ensureMetricCollectorReports creates MetricCollectorReport in each fleet-member-{clusterName} namespace
 func (r *Reconciler) ensureMetricCollectorReports(
 	ctx context.Context,
-	approvalReq client.Object,
+	approvalReq placementv1beta1.ApprovalRequestObj,
 	clusterNames []string,
 	updateRunName, stageName string,
 ) error {
