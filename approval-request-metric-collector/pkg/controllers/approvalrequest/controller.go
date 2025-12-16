@@ -64,35 +64,36 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		klog.V(2).InfoS("ApprovalRequest reconciliation ends", "request", req.NamespacedName, "latency", latency)
 	}()
 
-	var approvalReqObj placementv1beta1.ApprovalRequestObj
-	// Check if request has a namespace to determine resource type
+	approvalReqObj, err := r.getApprovalRequestObj(ctx, req)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			klog.V(2).InfoS("ApprovalRequest not found, ignoring", "request", req.NamespacedName)
+			return ctrl.Result{}, nil
+		}
+		klog.ErrorS(err, "Failed to get ApprovalRequest", "request", req.NamespacedName)
+		return ctrl.Result{}, err
+	}
+
+	return r.reconcileApprovalRequestObj(ctx, approvalReqObj)
+}
+
+// getApprovalRequestObj fetches either ApprovalRequest or ClusterApprovalRequest based on the request namespace.
+func (r *Reconciler) getApprovalRequestObj(ctx context.Context, req ctrl.Request) (placementv1beta1.ApprovalRequestObj, error) {
 	if req.Namespace != "" {
 		// Fetch namespaced ApprovalRequest
 		approvalReq := &placementv1beta1.ApprovalRequest{}
 		if err := r.Client.Get(ctx, req.NamespacedName, approvalReq); err != nil {
-			if errors.IsNotFound(err) {
-				klog.V(2).InfoS("ApprovalRequest not found, ignoring", "request", req.NamespacedName)
-				return ctrl.Result{}, nil
-			}
-			klog.ErrorS(err, "Failed to get ApprovalRequest", "request", req.NamespacedName)
-			return ctrl.Result{}, err
+			return nil, err
 		}
-		approvalReqObj = approvalReq
-	} else {
-		// Fetch cluster-scoped ClusterApprovalRequest
-		clusterApprovalReq := &placementv1beta1.ClusterApprovalRequest{}
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: req.Name}, clusterApprovalReq); err != nil {
-			if errors.IsNotFound(err) {
-				klog.V(2).InfoS("ClusterApprovalRequest not found, ignoring", "request", req.Name)
-				return ctrl.Result{}, nil
-			}
-			klog.ErrorS(err, "Failed to get ClusterApprovalRequest", "request", req.Name)
-			return ctrl.Result{}, err
-		}
-		approvalReqObj = clusterApprovalReq
+		return approvalReq, nil
 	}
 
-	return r.reconcileApprovalRequestObj(ctx, approvalReqObj)
+	// Fetch cluster-scoped ClusterApprovalRequest
+	clusterApprovalReq := &placementv1beta1.ClusterApprovalRequest{}
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: req.Name}, clusterApprovalReq); err != nil {
+		return nil, err
+	}
+	return clusterApprovalReq, nil
 }
 
 // reconcileApprovalRequestObj reconciles an ApprovalRequestObj (either ApprovalRequest or ClusterApprovalRequest).

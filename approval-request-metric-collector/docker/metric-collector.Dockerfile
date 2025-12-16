@@ -13,7 +13,7 @@ COPY pkg/ pkg/
 COPY cmd/ cmd/
 
 # Build the collector
-ARG GOARCH=amd64
+ARG GOARCH
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${GOARCH} go build \
     -a -o metric-collector \
     ./cmd/metriccollector
