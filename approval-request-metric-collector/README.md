@@ -27,13 +27,13 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
 2. **ClusterStagedWorkloadTracker** (cluster-scoped)
    - Defines which workloads to monitor for a ClusterStagedUpdateRun
    - The name must match the ClusterStagedUpdateRun name
-   - Specifies workload's name, namespace and expected health status
+   - Specifies workload's name, namespace, and kind (e.g., Deployment, StatefulSet)
    - Used by approval-request-controller to determine if stage is ready for approval
 
 3. **StagedWorkloadTracker** (namespaced)
    - Defines which workloads to monitor for a StagedUpdateRun
    - The name and namespace must match the StagedUpdateRun name and namespace
-   - Specifies namespace, workload name, and expected health status
+   - Specifies namespace, workload name, and kind
    - Used by approval-request-controller to determine if stage is ready for approval
 
 ### Automated Approval Flow
@@ -195,7 +195,7 @@ Result
 latest
 ```
 
-**You're now ready to proceed with the setup!** Your ACR contains all three required images that will be pulled by both kind and production clusters.
+**You're now ready to proceed with the setup!** Your ACR contains all three required images that will be pulled by your clusters.
 
 ### 4. Cleanup (After Testing)
 
@@ -256,7 +256,7 @@ The **WorkloadTracker** is a critical resource that tells the approval controlle
    - Cluster-scoped resource on the hub
    - Name must exactly match the ClusterStagedUpdateRun name
    - Example: If your UpdateRun is named `example-cluster-staged-run`, the tracker must also be named `example-cluster-staged-run`
-   - Contains a list of workloads (name + namespace) to monitor across all clusters in each stage
+   - Contains a list of workloads (name, namespace, and kind) to monitor across all clusters in each stage
 
 2. **StagedWorkloadTracker** (for StagedUpdateRun)
    - Namespace-scoped resource on the hub
@@ -268,15 +268,17 @@ The **WorkloadTracker** is a critical resource that tells the approval controlle
 ```yaml
 # ClusterStagedWorkloadTracker example
 workloads:
-  - name: sample-metric-app    # Deployment name
+  - name: sample-metric-app    # Workload name (matches the app label)
     namespace: test-ns         # Namespace where it runs
+    kind: Deployment           # Workload kind (optional, enables precise matching)
 ```
 
 When the approval controller evaluates a stage:
 1. It fetches the WorkloadTracker that matches the UpdateRun name (and namespace)
 2. For each cluster in the stage, it reads the MetricCollectorReport
-3. It verifies that every workload listed in the tracker appears in the report with `health=1.0`
-4. Only when ALL workloads in ALL clusters are healthy does it approve the stage
+3. It verifies that every workload listed in the tracker appears in the report as healthy
+4. The matching logic compares namespace, name, and kind (if specified) in a case-insensitive manner
+5. Only when ALL workloads in ALL clusters are healthy does it approve the stage
 
 **Critical Rule:** The WorkloadTracker must be created BEFORE starting the UpdateRun. If the controller can't find a matching tracker, it won't approve any stages.
 
@@ -307,24 +309,6 @@ When you create a **ClusterStagedUpdateRun** or **StagedUpdateRun**, here's what
 | **WorkloadTracker** | Specify which workloads to monitor for health | Hub |
 | **UpdateRun** | Start the staged rollout process | Hub |
 | **MetricCollectorReport** | Created by approval controller, updated by metric collector | Hub (fleet-member-* ns) |
-
-### What the Installation Scripts Do
-
-**`install-on-hub.sh`** (Approval Request Controller):
-- Takes ACR registry URL and hub cluster name as parameters
-- Pulls approval-request-controller image from ACR
-- Verifies KubeFleet CRDs are installed
-- Installs controller via Helm with custom CRDs (MetricCollectorReport, WorkloadTrackers)
-- Sets up RBAC for managing MetricCollectorReports and reading approval requests
-
-**`install-on-member.sh`** (Metric Collector):
-- Takes ACR registry URL, hub cluster, and member cluster names as parameters
-- Pulls metric-collector image from ACR
-- Creates service account with hub cluster access token and RBAC for watching/updating MetricCollectorReports
-- Installs metric-collector via Helm on each member cluster
-- Configures connection to hub API server to watch reports and local Prometheus for metrics
-
-With this understanding, you're ready to start the setup!
 
 ## Setup
 
@@ -409,9 +393,9 @@ scripts/install-on-hub.sh ${REGISTRY} <HUB_CONTEXT>
 ```
 
 The script performs the following:
-1. Pulls the `approval-request-controller` image from your ACR
-2. Verifies that required kubefleet CRDs are installed
-3. Installs the controller via Helm with the custom CRDs (MetricCollector, MetricCollectorReport, ClusterStagedWorkloadTracker, StagedWorkloadTracker)
+1. Configures the controller to use the approval-request-controller image from your ACR
+2. Verifies that required KubeFleet CRDs are installed
+3. Installs the controller via Helm with the custom CRDs (MetricCollectorReport, ClusterStagedWorkloadTracker, StagedWorkloadTracker)
 4. Verifies the installation
 
 ### 5. Configure Workload Tracker
@@ -424,7 +408,7 @@ Apply the appropriate workload tracker based on which type of staged update you'
 # Apply ClusterStagedWorkloadTracker
 # This defines which workloads to monitor for the staged rollout
 # The name "example-cluster-staged-run" must match the ClusterStagedUpdateRun name
-# Tracks: sample-metric-app in test-ns namespace
+# Tracks: sample-metric-app Deployment in test-ns namespace
 kubectl apply -f ./examples/workloadtracker/clusterstagedworkloadtracker.yaml
 ```
 
@@ -434,9 +418,12 @@ kubectl apply -f ./examples/workloadtracker/clusterstagedworkloadtracker.yaml
 # Apply StagedWorkloadTracker
 # This defines which workloads to monitor for the namespace-scoped staged rollout
 # The name "example-staged-run" and namespace "test-ns" must match the StagedUpdateRun
-# Tracks: sample-metric-app in test-ns namespace
+# Tracks: sample-metric-app in test-ns namespace with kind Deployment
 kubectl apply -f ./examples/workloadtracker/stagedworkloadtracker.yaml
 ```
+
+### 6. Install Metric Collector (Member Clusters)
+
 Install the metric collector on all member clusters using the ACR registry:
 
 ```bash
@@ -448,15 +435,20 @@ scripts/install-on-member.sh ${REGISTRY} <hub-cluster-name> <cluster-1-name> <cl
 # Example:
 # scripts/install-on-member.sh ${REGISTRY} hub cluster-1 cluster-2 cluster-3
 ```
+
+The script performs the following:
+1. Configures the metric-collector to use the image from your ACR
+2. Creates service account with hub cluster access token
+3. Installs metric-collector via Helm on each member cluster
 4. Configures connection to hub API server and local Prometheus
-```bash
-cd ../approval-request-controller
 
-# Switch to hub cluster context
-kubectl config use-context <hub-context>
+### 7. Start Staged Rollout
 
-# Apply ClusterStagedUpdateStrategy
+Choose one of the following options based on your use case:
+
 #### Option A: Cluster-Scoped Staged Update (ClusterStagedUpdateRun)
+
+Create a cluster-scoped staged update run:
 
 Switch back to hub cluster and create a cluster-scoped staged update run:
 
@@ -667,7 +659,7 @@ kubectl get metriccollectorreport -A
 - Verify RBAC permissions are configured correctly
 
 ### Metrics not being collected
-- Verify Prometheus is accessible: `kubectl port-forward -n test-ns svc/prometheus 9090:9090`
+- Verify Prometheus is accessible: `kubectl port-forward -n prometheus svc/prometheus 9090:9090`
 - Check metric collector logs for connection errors
 - Ensure workloads have Prometheus scrape annotations
 
@@ -676,7 +668,7 @@ kubectl get metriccollectorreport -A
 - Check that the workload tracker name matches the update run name:
   - For ClusterStagedUpdateRun: ClusterStagedWorkloadTracker name must match
   - For StagedUpdateRun: StagedWorkloadTracker name and namespace must match
-- Verify workload tracker resources define correct health thresholds
+- Verify workloads in the tracker match those reporting metrics (name, namespace, and kind)
 - Verify MetricCollectorReports are being created on the hub
 - Review approval-request-controller logs for decision-making details
 
