@@ -212,7 +212,7 @@ Before diving into the setup steps, here's a bird's eye view of what you'll be b
 ### Architecture Components
 
 **Hub Cluster** - The control plane where you'll deploy:
-1. **3 Member Clusters** (kind-cluster-1, kind-cluster-2, kind-cluster-3)
+1. **3 Member Clusters** (cluster-1, cluster-2, cluster-3)
    - Labeled with `environment=staging` or `environment=prod`
    - These labels determine which stage each cluster belongs to during rollouts
 
@@ -284,16 +284,16 @@ When the approval controller evaluates a stage:
 
 When you create a **ClusterStagedUpdateRun** or **StagedUpdateRun**, here's what happens:
 
-1. **Stage 1 (staging)**: Rollout starts with `kind-cluster-1`
+1. **Stage 1 (staging)**: Rollout starts with `cluster-1`
    - KubeFleet creates an ApprovalRequest for the staging stage
-   - Approval controller creates MetricCollectorReport in `fleet-member-kind-cluster-1` namespace
-   - Metric collector on `kind-cluster-1` watches its report on hub and updates status with health metrics
+   - Approval controller creates MetricCollectorReport in `fleet-member-cluster-1` namespace
+   - Metric collector on `cluster-1` watches its report on hub and updates status with health metrics
    - When `sample-metric-app` is healthy, approval controller auto-approves
-   - KubeFleet proceeds with the rollout to `kind-cluster-1`
+   - KubeFleet proceeds with the rollout to `cluster-1`
 
 2. **Stage 2 (prod)**: After staging succeeds
    - KubeFleet creates an ApprovalRequest for the prod stage
-   - Approval controller creates MetricCollectorReports in `fleet-member-kind-cluster-2` and `fleet-member-kind-cluster-3`
+   - Approval controller creates MetricCollectorReports in `fleet-member-cluster-2` and `fleet-member-cluster-3`
    - Metric collectors on both clusters watch their reports and update with health data
    - When ALL workloads across BOTH prod clusters are healthy, auto-approve
    - KubeFleet completes the rollout to production clusters
@@ -302,7 +302,6 @@ When you create a **ClusterStagedUpdateRun** or **StagedUpdateRun**, here's what
 
 | Resource | Purpose | Where |
 |----------|---------|-------|
-| **MemberCluster** | Register member clusters with hub, apply stage labels | Hub |
 | **ClusterResourcePlacement** | Define what resources to propagate (Prometheus, sample-app) | Hub |
 | **StagedUpdateStrategy** | Define stages with label selectors and approval requirements | Hub |
 | **WorkloadTracker** | Specify which workloads to monitor for health | Hub |
@@ -442,12 +441,12 @@ Install the metric collector on all member clusters using the ACR registry:
 
 ```bash
 # Run the installation script for all member clusters
-# Replace <hub-cluster-name> with your hub cluster name (e.g., kind-hub, hub)
+# Replace <hub-cluster-name> with your hub cluster name
 # Replace <cluster-1-name>, <cluster-2-name>, <cluster-3-name> with your actual cluster names
 scripts/install-on-member.sh ${REGISTRY} <hub-cluster-name> <cluster-1-name> <cluster-2-name> <cluster-3-name>
 
 # Example:
-# scripts/install-on-member.sh ${REGISTRY} kind-hub kind-cluster-1 kind-cluster-2 kind-cluster-3
+# scripts/install-on-member.sh ${REGISTRY} hub cluster-1 cluster-2 cluster-3
 ```
 4. Configures connection to hub API server and local Prometheus
 ```bash
@@ -502,7 +501,7 @@ Alternatively, you can use namespace-scoped resources:
 cd ../approval-request-controller
 
 # Switch to hub cluster
-kubectl config use-context kind-hub
+kubectl config use-context <hub-context>
 ```
 
 ``` bash
@@ -588,8 +587,8 @@ kubectl get metriccollectorreport -A
 
 Output:
 ```bash
-NAMESPACE                     NAME                                    WORKLOADS   LAST-COLLECTION   AGE
-fleet-member-kind-cluster-1   mc-example-cluster-staged-run-staging   1           27s               2m57s
+NAMESPACE                 NAME                                    WORKLOADS   LAST-COLLECTION   AGE
+fleet-member-cluster-1    mc-example-cluster-staged-run-staging   1           27s               2m57s
 ```
 
 #### For Namespace-Scoped Updates:
@@ -615,8 +614,8 @@ kubectl get metriccollectorreport -A
 
 Output:
 ```bash
-NAMESPACE                     NAME                            WORKLOADS   LAST-COLLECTION   AGE
-fleet-member-kind-cluster-1   mc-example-staged-run-staging   1           27s               57s
+NAMESPACE              NAME                          WORKLOADS   LAST-COLLECTION   AGE
+fleet-member-cluster-1 mc-example-staged-run-staging 1           27s               57s
 ```
 
 The approval controller will automatically approve stages when the metric collectors report that workloads are healthy.
@@ -627,14 +626,14 @@ The approval controller will automatically approve stages when the metric collec
 
 On the hub cluster:
 ```bash
-kubectl config use-context kind-hub
+kubectl config use-context <hub-context>
 kubectl get pods -n fleet-system
 kubectl logs -n fleet-system deployment/approval-request-controller -f
 ```
 
 On member clusters:
 ```bash
-kubectl config use-context kind-cluster-1
+kubectl config use-context <member-cluster-context>
 kubectl get pods -n default
 kubectl logs -n default deployment/metric-collector -f
 ```
@@ -643,7 +642,7 @@ kubectl logs -n default deployment/metric-collector -f
 
 Verify that MetricCollectorReports are being created and updated on the hub:
 ```bash
-kubectl config use-context kind-hub
+kubectl config use-context <hub-context>
 kubectl get metriccollectorreport -A
 ```
 
