@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Detect script directory to support execution from multiple locations
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 # Usage: ./install-on-member.sh <registry> <hub-cluster> <member-cluster-1> [member-cluster-2] [member-cluster-3] ...
 # Example: ./install-on-member.sh arvindtestacr.azurecr.io kind-hub kind-cluster-1 kind-cluster-2 kind-cluster-3
 
@@ -194,7 +198,7 @@ EOF
 
   # Step 4: Install helm chart on member cluster (includes CRD)
   echo "Step 4: Installing helm chart on member cluster..."
-  helm upgrade --install metric-collector ../charts/metric-collector \
+  helm upgrade --install metric-collector ${REPO_ROOT}/charts/metric-collector \
     --kube-context=${MEMBER_CONTEXT} \
     --namespace ${MEMBER_NAMESPACE} \
     --set memberCluster.name=${MEMBER_CLUSTER_NAME} \

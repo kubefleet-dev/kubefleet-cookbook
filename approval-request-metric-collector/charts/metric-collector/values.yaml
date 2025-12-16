@@ -34,34 +34,16 @@ hubCluster:
   # These resources must be applied on the hub cluster
   createRBAC: false
   
-  # Authentication configuration
+  # Token-based authentication configuration
   auth:
-    # Token-based authentication (default)
-    useTokenAuth: true
+    # Token secret details
     tokenSecretName: "hub-token"
     tokenSecretKey: "token"
-    
-    # Certificate-based authentication
-    useCertificateAuth: false
-    certSecretName: ""
-    certSecretKey: "tls.crt"
-    keySecretKey: "tls.key"
     
     # ServiceAccount details for RBAC binding on hub cluster
     # Leave empty to use the default serviceAccount from this chart
     serviceAccountName: ""
     serviceAccountNamespace: ""
-  
-  # TLS configuration
-  tls:
-    # Skip TLS verification (not recommended for production)
-    insecure: false
-    # CA certificate for hub cluster
-    caSecretName: ""
-    caSecretKey: "ca.crt"
-  
-  # Custom header for hub requests (optional)
-  customHeader: ""
 
 # Prometheus configuration
 prometheus:

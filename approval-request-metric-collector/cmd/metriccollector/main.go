@@ -20,7 +20,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -79,101 +78,36 @@ func main() {
 	}
 }
 
-// buildHubConfig creates hub cluster config from environment variables
-// following the same pattern as member-agent
+// buildHubConfig creates hub cluster config using token-based authentication
+// with TLS verification disabled (insecure mode)
 func buildHubConfig() (*rest.Config, error) {
 	hubURL := os.Getenv("HUB_SERVER_URL")
 	if hubURL == "" {
 		return nil, fmt.Errorf("HUB_SERVER_URL environment variable not set")
 	}
 
-	// Check for custom headers
-	customHeader := os.Getenv("HUB_KUBE_HEADER")
+	// Get token path (defaults to /var/run/secrets/hub/token)
+	configPath := os.Getenv("CONFIG_PATH")
+	if configPath == "" {
+		configPath = "/var/run/secrets/hub/token"
+	}
 
-	// Check TLS insecure flag
-	tlsInsecure := os.Getenv("TLS_INSECURE") == "true"
+	// Read token file
+	tokenData, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read hub token from %s: %w", configPath, err)
+	}
 
-	// Initialize hub config
-	hubConfig := &rest.Config{
-		Host: hubURL,
+	klog.InfoS("Using token-based authentication with insecure TLS for hub cluster")
+
+	// Create hub config with token auth and insecure TLS
+	return &rest.Config{
+		Host:        hubURL,
+		BearerToken: string(tokenData),
 		TLSClientConfig: rest.TLSClientConfig{
-			Insecure: tlsInsecure,
+			Insecure: true,
 		},
-		WrapTransport: func(rt http.RoundTripper) http.RoundTripper {
-			if customHeader != "" {
-				return &customHeaderTransport{
-					Base:   rt,
-					Header: customHeader,
-				}
-			}
-			return rt
-		},
-	}
-
-	// Check for certificate-based authentication
-	identityKey := os.Getenv("IDENTITY_KEY")
-	identityCert := os.Getenv("IDENTITY_CERT")
-	if identityKey != "" && identityCert != "" {
-		klog.InfoS("Using certificate-based authentication for hub cluster")
-		// Read certificate files
-		certData, err := os.ReadFile(identityCert)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read identity cert: %w", err)
-		}
-		keyData, err := os.ReadFile(identityKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read identity key: %w", err)
-		}
-		hubConfig.CertData = certData
-		hubConfig.KeyData = keyData
-	} else {
-		// Token-based authentication
-		klog.InfoS("Using token-based authentication for hub cluster")
-		configPath := os.Getenv("CONFIG_PATH")
-		if configPath == "" {
-			configPath = "/var/run/secrets/hub/token"
-		}
-		tokenData, err := os.ReadFile(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read hub token from %s: %w", configPath, err)
-		}
-		hubConfig.BearerToken = string(tokenData)
-	}
-
-	// Handle CA certificate
-	caBundle := os.Getenv("CA_BUNDLE")
-	hubCA := os.Getenv("HUB_CERTIFICATE_AUTHORITY")
-	if caBundle != "" {
-		klog.InfoS("Using CA bundle for hub cluster TLS")
-		caData, err := os.ReadFile(caBundle)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read CA bundle: %w", err)
-		}
-		hubConfig.CAData = caData
-	} else if hubCA != "" {
-		klog.InfoS("Using hub certificate authority for hub cluster TLS")
-		caData, err := os.ReadFile(hubCA)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read hub CA: %w", err)
-		}
-		hubConfig.CAData = caData
-	} else {
-		// If no CA specified, try to load system CA pool
-		klog.InfoS("No CA specified, using insecure connection or system CA pool")
-	}
-
-	return hubConfig, nil
-}
-
-// customHeaderTransport adds custom headers to requests
-type customHeaderTransport struct {
-	Base   http.RoundTripper
-	Header string
-}
-
-func (t *customHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	req.Header.Add("X-Custom-Header", t.Header)
-	return t.Base.RoundTrip(req)
+	}, nil
 }
 
 // Start starts the controller with hub cluster connection

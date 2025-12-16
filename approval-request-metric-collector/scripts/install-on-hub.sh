@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Detect script directory to support execution from multiple locations
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 # Usage: ./install-on-hub.sh <registry> <hub-cluster>
 # Example: ./install-on-hub.sh arvindtestacr.azurecr.io kind-hub
 

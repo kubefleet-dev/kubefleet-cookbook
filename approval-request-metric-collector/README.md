@@ -405,10 +405,8 @@ Install the approval request controller on the hub cluster using the ACR registr
 # Set your ACR registry name
 export REGISTRY="myfleetacr.azurecr.io"
 
-# Navigate to scripts directory and run the installation script
-cd scripts
-./install-on-hub.sh ${REGISTRY} <HUB_CONTEXT>
-cd ..
+# Run the installation script
+scripts/install-on-hub.sh ${REGISTRY} <HUB_CONTEXT>
 ```
 
 The script performs the following:
@@ -443,19 +441,13 @@ kubectl apply -f ./examples/workloadtracker/stagedworkloadtracker.yaml
 Install the metric collector on all member clusters using the ACR registry:
 
 ```bash
-# Navigate to scripts directory
-cd scripts
-
 # Run the installation script for all member clusters
 # Replace <hub-cluster-name> with your hub cluster name (e.g., kind-hub, hub)
 # Replace <cluster-1-name>, <cluster-2-name>, <cluster-3-name> with your actual cluster names
-./install-on-member.sh ${REGISTRY} <hub-cluster-name> <cluster-1-name> <cluster-2-name> <cluster-3-name>
+scripts/install-on-member.sh ${REGISTRY} <hub-cluster-name> <cluster-1-name> <cluster-2-name> <cluster-3-name>
 
 # Example:
-# ./install-on-member.sh ${REGISTRY} kind-hub kind-cluster-1 kind-cluster-2 kind-cluster-3
-
-# Return to parent directory
-cd ..
+# scripts/install-on-member.sh ${REGISTRY} kind-hub kind-cluster-1 kind-cluster-2 kind-cluster-3
 ```
 4. Configures connection to hub API server and local Prometheus
 ```bash

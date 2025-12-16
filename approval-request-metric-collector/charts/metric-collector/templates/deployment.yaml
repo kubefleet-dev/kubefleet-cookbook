@@ -54,47 +54,14 @@ spec:
           - name: PROMETHEUS_URL
             value: {{ .Values.prometheus.url | quote }}
           
-          {{- if .Values.hubCluster.customHeader }}
-          - name: HUB_KUBE_HEADER
-            value: {{ .Values.hubCluster.customHeader | quote }}
-          {{- end }}
-          
-          {{- if .Values.hubCluster.auth.useCertificateAuth }}
-          # Certificate-based authentication
-          - name: IDENTITY_CERT
-            value: /etc/hub-certs/{{ .Values.hubCluster.auth.certSecretKey }}
-          - name: IDENTITY_KEY
-            value: /etc/hub-certs/{{ .Values.hubCluster.auth.keySecretKey }}
-          {{- else }}
-          # Token-based authentication
+          # Token-based authentication (path to token file)
           - name: CONFIG_PATH
             value: /var/run/secrets/hub/{{ .Values.hubCluster.auth.tokenSecretKey }}
-          {{- end }}
-          
-          {{- if .Values.hubCluster.tls.insecure }}
-          - name: TLS_INSECURE
-            value: "true"
-          {{- else if .Values.hubCluster.tls.caSecretName }}
-          - name: HUB_CERTIFICATE_AUTHORITY
-            value: /etc/hub-ca/{{ .Values.hubCluster.tls.caSecretKey }}
-          {{- end }}
         
         volumeMounts:
-          {{- if .Values.hubCluster.auth.useCertificateAuth }}
-          - name: hub-certs
-            mountPath: /etc/hub-certs
-            readOnly: true
-          {{- else }}
           - name: hub-token
             mountPath: /var/run/secrets/hub
             readOnly: true
-          {{- end }}
-          
-          {{- if and (not .Values.hubCluster.tls.insecure) .Values.hubCluster.tls.caSecretName }}
-          - name: hub-ca
-            mountPath: /etc/hub-ca
-            readOnly: true
-          {{- end }}
         
         ports:
           {{- if .Values.metrics.enabled }}
@@ -128,21 +95,9 @@ spec:
           {{- toYaml .Values.controller.resources | nindent 10 }}
       
       volumes:
-        {{- if .Values.hubCluster.auth.useCertificateAuth }}
-        - name: hub-certs
-          secret:
-            secretName: {{ .Values.hubCluster.auth.certSecretName }}
-        {{- else }}
         - name: hub-token
           secret:
             secretName: {{ .Values.hubCluster.auth.tokenSecretName }}
-        {{- end }}
-        
-        {{- if and (not .Values.hubCluster.tls.insecure) .Values.hubCluster.tls.caSecretName }}
-        - name: hub-ca
-          secret:
-            secretName: {{ .Values.hubCluster.tls.caSecretName }}
-        {{- end }}
       
       {{- with .Values.controller.nodeSelector }}
       nodeSelector:
