@@ -216,48 +216,35 @@ func (r *Reconciler) ensureMetricCollectorReports(
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      reportName,
 				Namespace: reportNamespace,
-				Labels: map[string]string{
-					"approval-request": approvalReq.GetName(),
-					"update-run":       updateRunName,
-					"stage":            stageName,
-					"cluster":          clusterName,
-				},
-			},
-			Spec: autoapprovev1alpha1.MetricCollectorReportSpec{
-				// PrometheusURL is a configurable spec field that could differ per cluster.
-				// For setup simplicity, we use a constant value pointing to the Prometheus service
-				// deployed via examples/prometheus/service.yaml and propagated to all clusters.
-				// This assumes Prometheus is deployed with the same service name/namespace on all member clusters.
-				PrometheusURL: prometheusURL,
 			},
 		}
 
-		// Create or update MetricCollectorReport
-		existingReport := &autoapprovev1alpha1.MetricCollectorReport{}
-		err := r.Client.Get(ctx, types.NamespacedName{
-			Name:      reportName,
-			Namespace: reportNamespace,
-		}, existingReport)
+		// Create or update MetricCollectorReport using controllerutil
+		op, err := controllerutil.CreateOrUpdate(ctx, r.Client, report, func() error {
+			// Set labels
+			if report.Labels == nil {
+				report.Labels = make(map[string]string)
+			}
+			report.Labels["approval-request"] = approvalReq.GetName()
+			report.Labels["update-run"] = updateRunName
+			report.Labels["stage"] = stageName
+			report.Labels["cluster"] = clusterName
+
+			// Set spec
+			// PrometheusURL is a configurable spec field that could differ per cluster.
+			// For setup simplicity, we use a constant value pointing to the Prometheus service
+			// deployed via examples/prometheus/service.yaml and propagated to all clusters.
+			// This assumes Prometheus is deployed with the same service name/namespace on all member clusters.
+			report.Spec.PrometheusURL = prometheusURL
+
+			return nil
+		})
 
 		if err != nil {
-			if errors.IsNotFound(err) {
-				if err := r.Client.Create(ctx, report); err != nil {
-					return fmt.Errorf("failed to create MetricCollectorReport in %s: %w", reportNamespace, err)
-				}
-				klog.V(2).InfoS("Created MetricCollectorReport", "report", reportName, "namespace", reportNamespace, "cluster", clusterName)
-			} else {
-				return fmt.Errorf("failed to get MetricCollectorReport in %s: %w", reportNamespace, err)
-			}
-		} else {
-			// Update spec if needed
-			if existingReport.Spec.PrometheusURL != prometheusURL {
-				existingReport.Spec.PrometheusURL = prometheusURL
-				if err := r.Client.Update(ctx, existingReport); err != nil {
-					return fmt.Errorf("failed to update MetricCollectorReport in %s: %w", reportNamespace, err)
-				}
-				klog.V(2).InfoS("Updated MetricCollectorReport", "report", reportName, "namespace", reportNamespace, "cluster", clusterName)
-			}
+			return fmt.Errorf("failed to create or update MetricCollectorReport in %s: %w", reportNamespace, err)
 		}
+
+		klog.V(2).InfoS("Ensured MetricCollectorReport", "report", reportName, "namespace", reportNamespace, "cluster", clusterName, "operation", op)
 	}
 
 	return nil
@@ -271,8 +258,7 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 	clusterNames []string,
 	updateRunName, stageName string,
 ) error {
-	obj := approvalReqObj.(client.Object)
-	approvalReqRef := klog.KObj(obj)
+	approvalReqRef := klog.KObj(approvalReqObj)
 
 	klog.V(2).InfoS("Starting workload health check", "approvalRequest", approvalReqRef, "clusters", clusterNames)
 
@@ -281,7 +267,7 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 	var workloads []autoapprovev1alpha1.WorkloadReference
 	var workloadTrackerName string
 
-	if obj.GetNamespace() == "" {
+	if approvalReqObj.GetNamespace() == "" {
 		// Cluster-scoped: Get ClusterStagedWorkloadTracker with same name as ClusterStagedUpdateRun
 		clusterWorkloadTracker := &autoapprovev1alpha1.ClusterStagedWorkloadTracker{}
 		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName}, clusterWorkloadTracker); err != nil {
@@ -298,9 +284,9 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 	} else {
 		// Namespace-scoped: Get StagedWorkloadTracker with same name and namespace as StagedUpdateRun
 		stagedWorkloadTracker := &autoapprovev1alpha1.StagedWorkloadTracker{}
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName, Namespace: obj.GetNamespace()}, stagedWorkloadTracker); err != nil {
+		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName, Namespace: approvalReqObj.GetNamespace()}, stagedWorkloadTracker); err != nil {
 			if errors.IsNotFound(err) {
-				klog.V(2).InfoS("StagedWorkloadTracker not found, skipping health check", "approvalRequest", approvalReqRef, "updateRun", updateRunName, "namespace", obj.GetNamespace())
+				klog.V(2).InfoS("StagedWorkloadTracker not found, skipping health check", "approvalRequest", approvalReqRef, "updateRun", updateRunName, "namespace", approvalReqObj.GetNamespace())
 				return nil
 			}
 			klog.ErrorS(err, "Failed to get StagedWorkloadTracker", "approvalRequest", approvalReqRef, "updateRun", updateRunName)
@@ -395,29 +381,23 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 		klog.InfoS("All workloads are healthy, approving ApprovalRequest", "approvalRequest", approvalReqRef, "clusters", clusterNames, "workloads", len(workloads))
 
 		status := approvalReqObj.GetApprovalRequestStatus()
-		approvedCond := meta.FindStatusCondition(status.Conditions, string(placementv1beta1.ApprovalRequestConditionApproved))
+		// we have already checked that the condition is not present or not true.
+		meta.SetStatusCondition(&status.Conditions, metav1.Condition{
+			Type:               string(placementv1beta1.ApprovalRequestConditionApproved),
+			Status:             metav1.ConditionTrue,
+			ObservedGeneration: approvalReqObj.GetGeneration(),
+			Reason:             "AllWorkloadsHealthy",
+			Message:            fmt.Sprintf("All %d workloads are healthy across %d clusters", len(workloads), len(clusterNames)),
+		})
 
-		// Only update if not already approved
-		if approvedCond == nil || approvedCond.Status != metav1.ConditionTrue {
-			meta.SetStatusCondition(&status.Conditions, metav1.Condition{
-				Type:               string(placementv1beta1.ApprovalRequestConditionApproved),
-				Status:             metav1.ConditionTrue,
-				ObservedGeneration: obj.GetGeneration(),
-				Reason:             "AllWorkloadsHealthy",
-				Message:            fmt.Sprintf("All %d workloads are healthy across %d clusters", len(workloads), len(clusterNames)),
-			})
-
-			approvalReqObj.SetApprovalRequestStatus(*status)
-			if err := r.Client.Status().Update(ctx, obj); err != nil {
-				klog.ErrorS(err, "Failed to approve ApprovalRequest", "approvalRequest", approvalReqRef)
-				return fmt.Errorf("failed to approve ApprovalRequest: %w", err)
-			}
-
-			klog.InfoS("Successfully approved ApprovalRequest", "approvalRequest", approvalReqRef)
-			r.recorder.Event(obj, "Normal", "Approved", fmt.Sprintf("All %d workloads are healthy across %d clusters in stage %s", len(workloads), len(clusterNames), stageName))
-		} else {
-			klog.V(2).InfoS("ApprovalRequest already approved", "approvalRequest", approvalReqRef)
+		approvalReqObj.SetApprovalRequestStatus(*status)
+		if err := r.Client.Status().Update(ctx, approvalReqObj); err != nil {
+			klog.ErrorS(err, "Failed to approve ApprovalRequest", "approvalRequest", approvalReqRef)
+			return fmt.Errorf("failed to approve ApprovalRequest: %w", err)
 		}
+
+		klog.InfoS("Successfully approved ApprovalRequest", "approvalRequest", approvalReqRef)
+		r.recorder.Event(approvalReqObj, "Normal", "Approved", fmt.Sprintf("All %d workloads are healthy across %d clusters in stage %s", len(workloads), len(clusterNames), stageName))
 
 		// Approval successful or already approved
 		return nil
@@ -431,12 +411,11 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 
 // handleDelete handles the deletion of an ApprovalRequest or ClusterApprovalRequest
 func (r *Reconciler) handleDelete(ctx context.Context, approvalReqObj placementv1beta1.ApprovalRequestObj) (ctrl.Result, error) {
-	obj := approvalReqObj.(client.Object)
-	if !controllerutil.ContainsFinalizer(obj, metricCollectorFinalizer) {
+	if !controllerutil.ContainsFinalizer(approvalReqObj, metricCollectorFinalizer) {
 		return ctrl.Result{}, nil
 	}
 
-	approvalReqRef := klog.KObj(obj)
+	approvalReqRef := klog.KObj(approvalReqObj)
 	klog.V(2).InfoS("Cleaning up MetricCollectorReports for ApprovalRequest", "approvalRequest", approvalReqRef)
 
 	// Get cluster names from UpdateRun to know which reports to delete
@@ -447,7 +426,7 @@ func (r *Reconciler) handleDelete(ctx context.Context, approvalReqObj placementv
 
 	// Fetch UpdateRun to get cluster names
 	var clusterNames []string
-	if obj.GetNamespace() == "" {
+	if approvalReqObj.GetNamespace() == "" {
 		// Cluster-scoped: Get ClusterStagedUpdateRun
 		updateRun := &placementv1beta1.ClusterStagedUpdateRun{}
 		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName}, updateRun); err != nil {
@@ -469,7 +448,7 @@ func (r *Reconciler) handleDelete(ctx context.Context, approvalReqObj placementv
 	} else {
 		// Namespace-scoped: Get StagedUpdateRun
 		updateRun := &placementv1beta1.StagedUpdateRun{}
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName, Namespace: obj.GetNamespace()}, updateRun); err != nil {
+		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName, Namespace: approvalReqObj.GetNamespace()}, updateRun); err != nil {
 			if !errors.IsNotFound(err) {
 				klog.ErrorS(err, "Failed to get StagedUpdateRun for cleanup", "approvalRequest", approvalReqRef)
 			}
@@ -505,8 +484,8 @@ func (r *Reconciler) handleDelete(ctx context.Context, approvalReqObj placementv
 	}
 
 	// Remove finalizer
-	controllerutil.RemoveFinalizer(obj, metricCollectorFinalizer)
-	if err := r.Client.Update(ctx, obj); err != nil {
+	controllerutil.RemoveFinalizer(approvalReqObj, metricCollectorFinalizer)
+	if err := r.Client.Update(ctx, approvalReqObj); err != nil {
 		klog.ErrorS(err, "Failed to remove finalizer", "approvalRequest", approvalReqRef)
 		return ctrl.Result{}, err
 	}
