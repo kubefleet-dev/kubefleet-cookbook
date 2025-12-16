@@ -21,7 +21,10 @@ spec:
     spec:
       containers:
       - name: metric-app
-        image: myfleetacr.azurecr.io/metric-app:latest
+        image: arvindacr.azurecr.io/metric-app:latest
         imagePullPolicy: Always
+        env:
+        - name: WORKLOAD_KIND
+          value: "Deployment"
         ports:
         - containerPort: 8080

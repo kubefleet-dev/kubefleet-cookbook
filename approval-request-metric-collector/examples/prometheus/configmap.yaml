@@ -37,9 +37,5 @@ data:
             target_label: pod
           - source_labels: [__meta_kubernetes_pod_label_app]
             target_label: app
-          # Add workload controller kind
-          - source_labels: [__meta_kubernetes_pod_controller_kind]
-            target_label: workload_kind
-          # Add CLUSTER_NAME and WORKLOAD_NAME from env vars if present
           - action: labelmap
             regex: __meta_kubernetes_pod_label_(.+)

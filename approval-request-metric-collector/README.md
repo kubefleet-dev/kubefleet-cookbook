@@ -61,7 +61,7 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
    
    **Example Prometheus Metric:**
    ```
-   workload_health{app="sample-metric-app", instance="10.244.1.17:8080", job="kubernetes-pods", namespace="test-ns", pod="sample-metric-app-749d758c79-z2668", pod_template_hash="749d758c79", workload_kind="ReplicaSet"} 1.0
+   workload_health{app="sample-metric-app", instance="10.244.0.32:8080", job="kubernetes-pods", namespace="test-ns", pod="sample-metric-app-565fd6595b-7pfb6", pod_template_hash="565fd6595b", workload_kind="Deployment"} 1
    ```
 
    **Important Note on Multiple Pods:** When a workload (e.g., a Deployment) has multiple pods/replicas emitting health signals:
@@ -395,6 +395,24 @@ kubectl apply -f ./examples/sample-metric-app/
 ```
 
 > Note: If users are using a different REGISTRY, TAG variables from the setup, please update examples/sample-metric-app/sample-metric-app.yaml accordingly.
+
+**Important: Configuring WORKLOAD_KIND Environment Variable**
+
+The sample-metric-app emits a `workload_health` metric with a `workload_kind` label that identifies the parent workload type. This label **must match** the `kind` field specified in your WorkloadTracker.
+
+The sample deployment sets `WORKLOAD_KIND=Deployment`:
+```yaml
+env:
+- name: WORKLOAD_KIND
+  value: "Deployment"
+```
+
+For other workload types, update the environment variable accordingly:
+- **StatefulSet**: `WORKLOAD_KIND=StatefulSet`
+- **DaemonSet**: `WORKLOAD_KIND=DaemonSet`
+- **Job**: `WORKLOAD_KIND=Job`
+
+This is necessary because Prometheus's `__meta_kubernetes_pod_controller_kind` returns the immediate controller (e.g., ReplicaSet for Deployments), not the actual parent resource. By setting this environment variable, the metric app emits the correct workload type that matches your WorkloadTracker configuration.
 
 ### 4. Install Approval Request Controller (Hub Cluster)
 

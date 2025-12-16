@@ -21,7 +21,6 @@ package approvalrequest
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -358,7 +357,7 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 				// Match workload by namespace, name, and kind.
 				if collectedMetric.Namespace == trackedWorkload.Namespace &&
 					collectedMetric.WorkloadName == trackedWorkload.Name &&
-					strings.EqualFold(trackedWorkload.Kind, collectedMetric.WorkloadKind) {
+					trackedWorkload.Kind == collectedMetric.WorkloadKind {
 					found = true
 					healthy = collectedMetric.Health
 					klog.V(2).InfoS("Workload metric found", "approvalRequest", approvalReqRef, "cluster", clusterName, "workload", trackedWorkload.Name, "namespace", trackedWorkload.Namespace, "kind", trackedWorkload.Kind, "healthy", healthy)
