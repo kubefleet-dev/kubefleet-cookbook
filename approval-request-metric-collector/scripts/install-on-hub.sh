@@ -82,7 +82,7 @@ echo ""
 
 # Step 2: Install helm chart on hub cluster (includes MetricCollector, MetricCollectorReport, WorkloadTracker CRDs)
 echo "Step 2: Installing helm chart on hub cluster..."
-helm upgrade --install ${CHART_NAME} ../charts/${CHART_NAME} \
+helm upgrade --install ${CHART_NAME} ${REPO_ROOT}/charts/${CHART_NAME} \
   --kube-context=${HUB_CONTEXT} \
   --namespace ${NAMESPACE} \
   --create-namespace \

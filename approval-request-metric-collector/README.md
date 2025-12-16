@@ -56,9 +56,14 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
    - Every 30 seconds, it:
      - Queries local Prometheus using URL from report spec with PromQL: `workload_health`
      - Prometheus returns metrics for all pods with `prometheus.io/scrape: "true"` annotation
-     - Extracts workload health (1.0 = healthy, 0.0 = unhealthy)
+     - Extracts workload health (1.0 = healthy, 0.0 = unhealthy) along with metadata labels
      - Updates the `MetricCollectorReport` status on hub with **all** collected metrics
    
+   **Example Prometheus Metric:**
+   ```
+   workload_health{app="sample-metric-app", instance="10.244.1.17:8080", job="kubernetes-pods", namespace="test-ns", pod="sample-metric-app-749d758c79-z2668", pod_template_hash="749d758c79", workload_kind="ReplicaSet"} 1.0
+   ```
+
    **Important Note on Multiple Pods:** When a workload (e.g., a Deployment) has multiple pods/replicas emitting health signals:
    - The metric collector **collects all metrics** from Prometheus and stores them in the MetricCollectorReport
    - If `sample-metric-app` has 3 replicas, the report will contain 3 separate `WorkloadMetrics` entries
@@ -146,10 +151,14 @@ export TAG="latest"
 cd approval-request-metric-collector
 ```
 
-Build and push all images at once:
+Build and push all images at once, to build for a specific architecture (default is your system's architecture):
 
 ```bash
-make docker-build-all
+# For AMD64 (x86_64), ARCH used by AKS fleet, clusters.
+make docker-build-all GOARCH=amd64
+
+# For ARM64 (Apple Silicon, ARM servers)
+make docker-build-all GOARCH=arm64
 ```
 
 Or build individual images:
@@ -344,6 +353,11 @@ The `StagedUpdateStrategy` uses these labels to select clusters for each stage:
 - **Stage 1 (staging)**: Selects clusters with `environment=staging`
 - **Stage 2 (prod)**: Selects clusters with `environment=prod`
 
+Note: If you are updating fleet member cluster CRs joined via Azure portal, CLI please use the following command, this is because we don't allow users to use kubectl to update labels directly a validating webhook configuration will deny any user,
+```
+az fleet member update -g <resourceGroupName> -f <fleetName> -n <memberClusterName> --labels "<labelKey>=<labelValue>"
+```
+
 ### 2. Deploy Prometheus
 
 From the kubefleet-cookbook repo, navigate to the approval-request-metric-collector directory and deploy Prometheus for metrics collection:
@@ -376,7 +390,9 @@ Create the test namespace and deploy the sample application:
 # Create test namespace
 kubectl create ns test-ns
 
-Then apply: `kubectl apply -f ./examples/sample-metric-app/`
+# Create sample-metric-app deployment
+kubectl apply -f ./examples/sample-metric-app/
+```
 
 > Note: If users are using a different REGISTRY, TAG variables from the setup, please update examples/sample-metric-app/sample-metric-app.yaml accordingly.
 
@@ -427,10 +443,14 @@ kubectl apply -f ./examples/workloadtracker/stagedworkloadtracker.yaml
 Install the metric collector on all member clusters using the ACR registry:
 
 ```bash
+# Find the contexts for hub, member clusters.
+kubectl config get-contexts
+```
+
+```bash
 # Run the installation script for all member clusters
-# Replace <hub-cluster-name> with your hub cluster name
-# Replace <cluster-1-name>, <cluster-2-name>, <cluster-3-name> with your actual cluster names
-scripts/install-on-member.sh ${REGISTRY} <hub-cluster-name> <cluster-1-name> <cluster-2-name> <cluster-3-name>
+# Replace <hub-context> <cluster-1-context> <cluster-2-context> <cluster-3-context> with your actual cluster contexts
+scripts/install-on-member.sh ${REGISTRY} <hub-context> <cluster-1-context> <cluster-2-context> <cluster-3-context>
 
 # Example:
 # scripts/install-on-member.sh ${REGISTRY} hub cluster-1 cluster-2 cluster-3
@@ -453,6 +473,7 @@ Create a cluster-scoped staged update run:
 Switch back to hub cluster and create a cluster-scoped staged update run:
 
 ```bash
+kubectl config use-context <hub-context>
 # Apply ClusterStagedUpdateStrategy
 # Defines the stages for the rollout: staging (cluster-1) -> prod (cluster-2, cluster-3)
 # Each stage requires approval before proceeding

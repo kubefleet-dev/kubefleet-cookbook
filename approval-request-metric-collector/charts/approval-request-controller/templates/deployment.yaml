@@ -37,6 +37,7 @@ spec:
         args:
           - --metrics-bind-address=:{{ .Values.metrics.port }}
           - --health-probe-bind-address=:{{ .Values.healthProbe.port }}
+          - -v={{ .Values.controller.logLevel }}
         
         ports:
           {{- if .Values.metrics.enabled }}
