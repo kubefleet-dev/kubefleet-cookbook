@@ -96,6 +96,10 @@ type WorkloadMetrics struct {
 	// +required
 	WorkloadName string `json:"workloadName"`
 
+	// Kind of the workload controller (e.g., Deployment, StatefulSet, DaemonSet).
+	// +optional
+	WorkloadKind string `json:"workloadKind,omitempty"`
+
 	// Health indicates if the workload is healthy (true=healthy, false=unhealthy).
 	// +required
 	Health bool `json:"health"`

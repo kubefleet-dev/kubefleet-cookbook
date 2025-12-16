@@ -48,6 +48,10 @@ spec:
             items:
               description: WorkloadReference represents a workload to be tracked
               properties:
+                kind:
+                  description: Kind is the kind of the workload controller (e.g.,
+                    Deployment, StatefulSet, DaemonSet)
+                  type: string
                 name:
                   description: Name is the name of the workload
                   type: string

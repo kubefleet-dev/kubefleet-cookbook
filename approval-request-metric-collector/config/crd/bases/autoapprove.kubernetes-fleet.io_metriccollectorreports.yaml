@@ -84,7 +84,7 @@ spec:
                   each workload.
                 items:
                   description: WorkloadMetrics represents metrics collected from a
-                    single workload pod.
+                    single workload.
                   properties:
                     health:
                       description: Health indicates if the workload is healthy (true=healthy,
@@ -93,8 +93,12 @@ spec:
                     namespace:
                       description: Namespace of the workload.
                       type: string
+                    workloadKind:
+                      description: Kind of the workload controller (e.g., Deployment,
+                        StatefulSet, DaemonSet).
+                      type: string
                     workloadName:
-                      description: WorkloadName from the workload_health metric label.
+                      description: Name of the workload.
                       type: string
                   required:
                   - health

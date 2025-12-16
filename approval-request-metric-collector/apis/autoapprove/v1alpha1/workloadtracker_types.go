@@ -29,6 +29,10 @@ type WorkloadReference struct {
 	// Namespace is the namespace of the workload
 	// +required
 	Namespace string `json:"namespace"`
+
+	// Kind is the kind of the workload controller (e.g., Deployment, StatefulSet, DaemonSet)
+	// +optional
+	Kind string `json:"kind,omitempty"`
 }
 
 // +genclient

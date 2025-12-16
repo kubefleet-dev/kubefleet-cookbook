@@ -21,6 +21,7 @@ package approvalrequest
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -354,11 +355,13 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 			// 3. Apply your aggregation logic (e.g., allHealthy := all metrics have Health==true)
 			// 4. Set 'healthy' based on the aggregated result
 			for _, collectedMetric := range report.Status.CollectedMetrics {
+				// Match workload by namespace, name, and kind.
 				if collectedMetric.Namespace == trackedWorkload.Namespace &&
-					collectedMetric.WorkloadName == trackedWorkload.Name {
+					collectedMetric.WorkloadName == trackedWorkload.Name &&
+					strings.EqualFold(trackedWorkload.Kind, collectedMetric.WorkloadKind) {
 					found = true
 					healthy = collectedMetric.Health
-					klog.V(2).InfoS("Workload metric found", "approvalRequest", approvalReqRef, "cluster", clusterName, "workload", trackedWorkload.Name, "namespace", trackedWorkload.Namespace, "healthy", healthy)
+					klog.V(2).InfoS("Workload metric found", "approvalRequest", approvalReqRef, "cluster", clusterName, "workload", trackedWorkload.Name, "namespace", trackedWorkload.Namespace, "kind", trackedWorkload.Kind, "healthy", healthy)
 					break // Remove this to collect all metrics for aggregation
 				}
 			}

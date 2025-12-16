@@ -6,3 +6,4 @@ metadata:
 workloads:
   - name: sample-metric-app
     namespace: test-ns
+    kind: Deployment

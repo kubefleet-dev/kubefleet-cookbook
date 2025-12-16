@@ -129,13 +129,15 @@ func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient P
 	// Extract metrics from Prometheus result
 	for _, res := range data.Result {
 		// Extract labels from the Prometheus metric
-		// The workload_health metric includes labels like: workload_health{namespace="test-ns",app="sample-app"}
+		// The workload_health metric includes labels like: workload_health{namespace="test-ns",app="sample-app",workload_kind="Deployment"}
 		// These labels come from Kubernetes pod labels and are added by Prometheus during scraping.
 		// The relabeling configuration is in examples/prometheus/configmap.yaml:
 		//   - namespace: from __meta_kubernetes_namespace (pod's namespace)
 		//   - app: from __meta_kubernetes_pod_label_app (pod's "app" label)
+		//   - workload_kind: from __meta_kubernetes_pod_controller_kind (controller kind)
 		namespace := res.Metric["namespace"]
 		workloadName := res.Metric["app"]
+		workloadKind := res.Metric["workload_kind"]
 
 		if namespace == "" || workloadName == "" {
 			continue
@@ -158,6 +160,7 @@ func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient P
 		workloadMetrics := autoapprovev1alpha1.WorkloadMetrics{
 			WorkloadName: workloadName,
 			Namespace:    namespace,
+			WorkloadKind: workloadKind,
 			Health:       health >= 1.0,
 		}
 		collectedMetrics = append(collectedMetrics, workloadMetrics)
