@@ -2,6 +2,8 @@
 
 This tutorial demonstrates how to use the Approval Request Controller and Metric Collector with KubeFleet for automated staged rollout approvals based on workload health metrics.
 
+> **Note:** This tutorial is self-contained and provides all the steps needed to get started. For additional context on KubeFleet's staged update functionality, you can optionally refer to the [Staged Update How-To Guide](https://github.com/Azure/fleet/blob/main/docs/howtos/staged-update.md).
+
 ## Overview
 
 This directory contains two controllers:
