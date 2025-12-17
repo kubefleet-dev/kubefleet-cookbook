@@ -532,7 +532,7 @@ kubectl get csur -A
 
 Alternatively, you can use namespace-scoped resources:
 
-``` bash
+```bash
 # Switch to hub cluster
 kubectl config use-context <hub-context>
 

@@ -55,10 +55,7 @@ prometheus:
 controller:
   # Number of replicas
   replicas: 1
-  
-  # Collection interval (how often to scrape metrics)
-  collectionInterval: "30s"
-  
+
   # Log verbosity level (0-10)
   logLevel: 2
   

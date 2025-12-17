@@ -24,10 +24,10 @@ rules:
   
   # MetricCollector and MetricCollectorReport (our custom resources)
   - apiGroups: ["autoapprove.kubernetes-fleet.io"]
-    resources: ["metriccollectors", "metriccollectorreports"]
+    resources: ["metriccollectorreports"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["autoapprove.kubernetes-fleet.io"]
-    resources: ["metriccollectors/status", "metriccollectorreports/status"]
+    resources: ["metriccollectorreports/status"]
     verbs: ["update", "patch"]
   
   # ClusterResourcePlacement and ClusterResourceOverride (KubeFleet resources)
