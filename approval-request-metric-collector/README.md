@@ -425,7 +425,7 @@ Install the approval request controller on the hub cluster using the ACR registr
 export REGISTRY="myfleetacr.azurecr.io"
 
 # Run the installation script
-scripts/install-on-hub.sh ${REGISTRY} <HUB_CONTEXT>
+scripts/install-on-hub.sh ${REGISTRY} <hub-context>
 ```
 
 The script performs the following:

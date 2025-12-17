@@ -46,6 +46,9 @@ const (
 
 	// prometheusURL is the default Prometheus URL to use for all clusters
 	prometheusURL = "http://prometheus.prometheus.svc.cluster.local:9090"
+
+	// parentApprovalRequestLabel is the label key used to track which ApprovalRequest owns the MetricCollectorReport
+	parentApprovalRequestLabel = "kubernetes-fleet.io/parent-approval-request"
 )
 
 // Reconciler reconciles an ApprovalRequest object and creates MetricCollectorReport resources
@@ -226,10 +229,17 @@ func (r *Reconciler) ensureMetricCollectorReports(
 			if report.Labels == nil {
 				report.Labels = make(map[string]string)
 			}
-			report.Labels["approval-request"] = approvalReq.GetName()
-			report.Labels["update-run"] = updateRunName
-			report.Labels["stage"] = stageName
-			report.Labels["cluster"] = clusterName
+
+			// Set parent-approval-request label to uniquely identify the ApprovalRequest
+			// For cluster-scoped ApprovalRequests: just the name
+			// For namespace-scoped ApprovalRequests: namespace.name format (using dot as separator)
+			if approvalReq.GetNamespace() == "" {
+				// Cluster-scoped: ClusterApprovalRequest
+				report.Labels[parentApprovalRequestLabel] = approvalReq.GetName()
+			} else {
+				// Namespace-scoped: ApprovalRequest (use dot instead of slash for valid label)
+				report.Labels[parentApprovalRequestLabel] = fmt.Sprintf("%s.%s", approvalReq.GetNamespace(), approvalReq.GetName())
+			}
 
 			// Set spec
 			// PrometheusURL is a configurable spec field that could differ per cluster.
@@ -421,69 +431,41 @@ func (r *Reconciler) handleDelete(ctx context.Context, approvalReqObj placementv
 	approvalReqRef := klog.KObj(approvalReqObj)
 	klog.V(2).InfoS("Cleaning up MetricCollectorReports for ApprovalRequest", "approvalRequest", approvalReqRef)
 
-	// Get cluster names from UpdateRun to know which reports to delete
-	spec := approvalReqObj.GetApprovalRequestSpec()
-	updateRunName := spec.TargetUpdateRun
-	stageName := spec.TargetStage
-	reportName := fmt.Sprintf("mc-%s-%s", updateRunName, stageName)
-
-	// Fetch UpdateRun to get cluster names
-	var clusterNames []string
+	// Build the parent-approval-request label value to match
+	// For cluster-scoped: just the name
+	// For namespace-scoped: namespace.name format (using dot as separator)
+	var parentApprovalRequestValue string
 	if approvalReqObj.GetNamespace() == "" {
-		// Cluster-scoped: Get ClusterStagedUpdateRun
-		updateRun := &placementv1beta1.ClusterStagedUpdateRun{}
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName}, updateRun); err != nil {
-			if !errors.IsNotFound(err) {
-				klog.ErrorS(err, "Failed to get ClusterStagedUpdateRun for cleanup", "approvalRequest", approvalReqRef)
-			}
-			// Continue with finalizer removal even if UpdateRun not found
-		} else {
-			// Find the stage
-			for i := range updateRun.Status.StagesStatus {
-				if updateRun.Status.StagesStatus[i].StageName == stageName {
-					for _, cluster := range updateRun.Status.StagesStatus[i].Clusters {
-						clusterNames = append(clusterNames, cluster.ClusterName)
-					}
-					break
-				}
-			}
-		}
+		// Cluster-scoped: ClusterApprovalRequest
+		parentApprovalRequestValue = approvalReqObj.GetName()
 	} else {
-		// Namespace-scoped: Get StagedUpdateRun
-		updateRun := &placementv1beta1.StagedUpdateRun{}
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: updateRunName, Namespace: approvalReqObj.GetNamespace()}, updateRun); err != nil {
-			if !errors.IsNotFound(err) {
-				klog.ErrorS(err, "Failed to get StagedUpdateRun for cleanup", "approvalRequest", approvalReqRef)
-			}
-			// Continue with finalizer removal even if UpdateRun not found
-		} else {
-			// Find the stage
-			for i := range updateRun.Status.StagesStatus {
-				if updateRun.Status.StagesStatus[i].StageName == stageName {
-					for _, cluster := range updateRun.Status.StagesStatus[i].Clusters {
-						clusterNames = append(clusterNames, cluster.ClusterName)
-					}
-					break
-				}
-			}
-		}
+		// Namespace-scoped: ApprovalRequest (use dot instead of slash for valid label)
+		parentApprovalRequestValue = fmt.Sprintf("%s.%s", approvalReqObj.GetNamespace(), approvalReqObj.GetName())
 	}
 
-	// Delete MetricCollectorReport from each fleet-member namespace
-	for _, clusterName := range clusterNames {
-		reportNamespace := fmt.Sprintf(utils.NamespaceNameFormat, clusterName)
-		report := &autoapprovev1alpha1.MetricCollectorReport{}
+	// List all MetricCollectorReports with the parent-approval-request label across all namespaces
+	reportList := &autoapprovev1alpha1.MetricCollectorReportList{}
+	listOptions := []client.ListOption{
+		client.MatchingLabels{
+			parentApprovalRequestLabel: parentApprovalRequestValue,
+		},
+	}
 
-		if err := r.Client.Get(ctx, types.NamespacedName{
-			Name:      reportName,
-			Namespace: reportNamespace,
-		}, report); err == nil {
-			if err := r.Client.Delete(ctx, report); err != nil && !errors.IsNotFound(err) {
-				klog.ErrorS(err, "Failed to delete MetricCollectorReport", "report", reportName, "namespace", reportNamespace, "cluster", clusterName)
-				return ctrl.Result{}, fmt.Errorf("failed to delete MetricCollectorReport in %s: %w", reportNamespace, err)
-			}
-			klog.V(2).InfoS("Deleted MetricCollectorReport", "report", reportName, "namespace", reportNamespace, "cluster", clusterName)
+	if err := r.Client.List(ctx, reportList, listOptions...); err != nil {
+		klog.ErrorS(err, "Failed to list MetricCollectorReports for cleanup", "approvalRequest", approvalReqRef, "parentApprovalRequest", parentApprovalRequestValue)
+		return ctrl.Result{}, fmt.Errorf("failed to list MetricCollectorReports: %w", err)
+	}
+
+	klog.V(2).InfoS("Found MetricCollectorReports to delete", "approvalRequest", approvalReqRef, "count", len(reportList.Items))
+
+	// Delete all found MetricCollectorReports
+	for i := range reportList.Items {
+		report := &reportList.Items[i]
+		if err := r.Client.Delete(ctx, report); err != nil && !errors.IsNotFound(err) {
+			klog.ErrorS(err, "Failed to delete MetricCollectorReport", "report", report.Name, "namespace", report.Namespace)
+			return ctrl.Result{}, fmt.Errorf("failed to delete MetricCollectorReport %s/%s: %w", report.Namespace, report.Name, err)
 		}
+		klog.V(2).InfoS("Deleted MetricCollectorReport", "report", report.Name, "namespace", report.Namespace)
 	}
 
 	// Remove finalizer
@@ -493,7 +475,7 @@ func (r *Reconciler) handleDelete(ctx context.Context, approvalReqObj placementv
 		return ctrl.Result{}, err
 	}
 
-	klog.V(2).InfoS("Successfully cleaned up MetricCollectorReports", "approvalRequest", approvalReqRef, "clusters", clusterNames)
+	klog.V(2).InfoS("Successfully cleaned up MetricCollectorReports", "approvalRequest", approvalReqRef, "deletedCount", len(reportList.Items))
 	return ctrl.Result{}, nil
 }
 
