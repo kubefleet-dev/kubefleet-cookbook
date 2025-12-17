@@ -149,8 +149,17 @@ func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient P
 		var health float64
 		if len(res.Value) >= 2 {
 			if valueStr, ok := res.Value[1].(string); ok {
-				fmt.Sscanf(valueStr, "%f", &health)
+				if _, err := fmt.Sscanf(valueStr, "%f", &health); err != nil {
+					klog.ErrorS(err, "Failed to parse health value from Prometheus result", "namespace", namespace, "workload", workloadName, "kind", workloadKind, "valueStr", valueStr)
+					continue
+				}
+			} else {
+				klog.ErrorS(nil, "Health value is not a string in Prometheus result", "namespace", namespace, "workload", workloadName, "kind", workloadKind, "value", res.Value[1])
+				continue
 			}
+		} else {
+			klog.ErrorS(nil, "Prometheus result value array has insufficient elements", "namespace", namespace, "workload", workloadName, "kind", workloadKind, "valueLength", len(res.Value))
+			continue
 		}
 
 		// Convert float to bool: workload is healthy if metric value >= 1.0

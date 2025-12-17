@@ -162,9 +162,13 @@ func (r *Reconciler) reconcileApprovalRequestObj(ctx context.Context, approvalRe
 	}
 
 	if stageStatus == nil {
-		err := fmt.Errorf("stage %s not found in UpdateRun %s", stageName, updateRunName)
-		klog.ErrorS(err, "Failed to find stage", "approvalRequest", approvalReqRef)
-		return ctrl.Result{}, err
+		// This should never happen - ApprovalRequest is only created after stage initialization
+		// If we reach here, it indicates an unexpected state inconsistency
+		// This is a non-retriable error - retrying won't fix the underlying issue
+		klog.ErrorS(nil, "Unexpected state: stage not found in UpdateRun - this indicates unexpected behavior as ApprovalRequest should only be created for initialized stages", "approvalRequest", approvalReqRef, "updateRun", updateRunName, "stage", stageName)
+		r.recorder.Event(approvalReqObj, "Warning", "UnexpectedState", fmt.Sprintf("Stage %s not found in UpdateRun %s", stageName, updateRunName))
+		// Don't return error to avoid retries - this won't be fixed by reconciliation
+		return ctrl.Result{}, nil
 	}
 
 	// Get all cluster names from the stage
