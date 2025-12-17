@@ -493,7 +493,9 @@ Create a cluster-scoped staged update run:
 Switch back to hub cluster and create a cluster-scoped staged update run:
 
 ```bash
+# Switch to hub cluster
 kubectl config use-context <hub-context>
+
 # Apply ClusterStagedUpdateStrategy
 # Defines the stages for the rollout: staging (cluster-1) -> prod (cluster-2, cluster-3)
 # Each stage requires approval before proceeding
@@ -530,14 +532,10 @@ kubectl get csur -A
 
 Alternatively, you can use namespace-scoped resources:
 
-```bash
-cd ../approval-request-controller
-
+``` bash
 # Switch to hub cluster
 kubectl config use-context <hub-context>
-```
 
-``` bash
 # Apply namespace-scoped ClusterResourcePlacement
 # This CRP is configured to only place resources in the test-ns namespace
 # This resource is needed because we cannot propagate Namespace which is a 
@@ -549,9 +547,9 @@ kubectl get crp -A
 
 Output:
 ```bash
-NAME              GEN   SCHEDULED   SCHEDULED-GEN   AVAILABLE   AVAILABLE-GEN   AGE
-ns-only-crp       1     True        1               True        1               5s
-prometheus-crp   1     True        1               True        1               2m34s
+NAME             GEN   SCHEDULED   SCHEDULED-GEN   AVAILABLE   AVAILABLE-GEN   AGE
+ns-only-crp      1     True        1               True        1               4s
+prometheus-crp   1     True        1               True        1               31m
 ```
 
 ```bash
