@@ -63,9 +63,3 @@ docker-build-all: docker-build-approval-controller docker-build-metric-collector
 
 .PHONY: docker-build
 docker-build: docker-build-all ## Alias for docker-build-all
-
-##@ Development
-
-.PHONY: run
-run: ## Run controller locally
-	go run ./cmd/approvalrequestcontroller/main.go
