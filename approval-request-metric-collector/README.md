@@ -21,7 +21,7 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
 #### Hub Cluster CRDs
 
 1. **MetricCollectorReport** (namespaced)
-   - Created by approval-request-controller in `fleet-member-<cluster-name>` namespaces on hub
+   - Created by approval-request-controller in `fleet-member-<cluster-name>` namespaces on hub (these namespaces are automatically created by KubeFleet when member clusters join)
    - Watched and updated by metric-collector running on member clusters
    - Contains specification of Prometheus URL and collected `workload_health` metrics
    - Updated every 30 seconds by the metric collector with latest health data
@@ -48,7 +48,7 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
 2. **Metric Collector Report Creation**
    - Approval-request-controller watches the `ClusterApprovalRequest` and `ApprovalRequest` objects
    - For each cluster in the current stage:
-     - Creates a `MetricCollectorReport` in `fleet-member-<cluster-name>` namespace on hub
+     - Creates a `MetricCollectorReport` in the `fleet-member-<cluster-name>` namespace on hub (this namespace already exists, created by KubeFleet when the member cluster joined)
      - Sets `spec.prometheusUrl` to the Prometheus endpoint
      - Each report is specific to one cluster
 
@@ -355,10 +355,27 @@ The `StagedUpdateStrategy` uses these labels to select clusters for each stage:
 - **Stage 1 (staging)**: Selects clusters with `environment=staging`
 - **Stage 2 (prod)**: Selects clusters with `environment=prod`
 
-Note: If you are updating fleet member cluster CRs joined via Azure portal, CLI please use the following command, this is because we don't allow users to use kubectl to update labels directly a validating webhook configuration will deny any user,
-```
+**Labeling Options:**
+
+For **Azure-managed member clusters** (joined via Azure portal/CLI):
+```bash
 az fleet member update -g <resourceGroupName> -f <fleetName> -n <memberClusterName> --labels "<labelKey>=<labelValue>"
 ```
+> **Note:** Member clusters joined via Azure portal or CLI have a validating webhook that prevents direct kubectl modifications. You must use the `az fleet member update` command and cannot use `kubectl label` or `kubectl edit`.
+
+For **manually created member clusters** (e.g., kind clusters):
+```bash
+# Option 1: Add labels using kubectl label
+kubectl label membercluster <cluster-name> environment=staging
+
+# Option 2: Edit the MemberCluster CR directly
+kubectl edit membercluster <cluster-name>
+
+# Option 3: Apply example files with labels pre-configured
+# Edit examples/membercluster/fleet_v1beta1_membercluster.yaml with your cluster details and labels
+kubectl apply -f ./examples/membercluster/fleet_v1beta1_membercluster.yaml
+```
+The example files in `examples/membercluster/` show how to create MemberCluster CRs with the appropriate labels already configured.
 
 ### 2. Deploy Prometheus
 

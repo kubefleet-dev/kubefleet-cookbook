@@ -4,7 +4,6 @@ metadata:
   name: kind-cluster-1
   labels:
     environment: staging
-    kubernetes-fleet.io/cluster-name: kind-cluster-1
 spec:
   identity:
     name: fleet-member-agent-cluster-1
@@ -18,7 +17,6 @@ metadata:
   name: kind-cluster-2
   labels:
     environment: prod
-    kubernetes-fleet.io/cluster-name: kind-cluster-2
 spec:
   identity:
     name: fleet-member-agent-cluster-2
@@ -32,7 +30,6 @@ metadata:
   name: kind-cluster-3
   labels:
     environment: prod
-    kubernetes-fleet.io/cluster-name: kind-cluster-3
 spec:
   identity:
     name: fleet-member-agent-cluster-3
