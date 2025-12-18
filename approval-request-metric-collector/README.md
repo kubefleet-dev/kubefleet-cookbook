@@ -68,7 +68,7 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
 
    **Important Note on Multiple Pods:** When a workload (e.g., a Deployment) has multiple pods/replicas emitting health signals:
    - The metric collector **collects all metrics** from Prometheus and stores them in the MetricCollectorReport
-   - If `sample-metric-app` has 3 replicas, the report will contain 3 separate `WorkloadMetrics` entries
+   - If `sample-metric-app` has 3 replicas, the report will contain 3 separate `WorkloadMetric` entries
    - However, for simplicity, the approval-request-controller only evaluates the **first matching metric** when checking workload health
    - This means if the first pod reports healthy, the workload is considered healthy, even if other pods report differently
    - This simplified approach works well when all pods of a workload consistently report the same health status

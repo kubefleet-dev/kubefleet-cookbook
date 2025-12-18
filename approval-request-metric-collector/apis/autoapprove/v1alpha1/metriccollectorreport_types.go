@@ -83,11 +83,11 @@ type MetricCollectorReportStatus struct {
 
 	// CollectedMetrics contains the most recent metrics from each workload.
 	// +optional
-	CollectedMetrics []WorkloadMetrics `json:"collectedMetrics,omitempty"`
+	CollectedMetrics []WorkloadMetric `json:"collectedMetrics,omitempty"`
 }
 
-// WorkloadMetrics represents metrics collected from a single workload.
-type WorkloadMetrics struct {
+// WorkloadMetric represents metrics collected from a single workload.
+type WorkloadMetric struct {
 	// Namespace of the workload.
 	// +required
 	Namespace string `json:"namespace"`
@@ -99,6 +99,10 @@ type WorkloadMetrics struct {
 	// Kind of the workload controller (e.g., Deployment, StatefulSet, DaemonSet).
 	// +optional
 	WorkloadKind string `json:"workloadKind,omitempty"`
+
+	// PodName is the name of the specific pod that reported this metric.
+	// +required
+	PodName string `json:"podName"`
 
 	// Health indicates if the workload is healthy (true=healthy, false=unhealthy).
 	// +required

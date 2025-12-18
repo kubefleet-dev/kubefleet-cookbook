@@ -85,7 +85,6 @@ echo "Step 2: Installing helm chart on hub cluster..."
 helm upgrade --install ${CHART_NAME} ${REPO_ROOT}/charts/${CHART_NAME} \
   --kube-context=${HUB_CONTEXT} \
   --namespace ${NAMESPACE} \
-  --create-namespace \
   --set image.repository=${IMAGE_REPOSITORY} \
   --set image.tag=${IMAGE_TAG} \
   --set image.pullPolicy=Always \

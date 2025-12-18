@@ -31,8 +31,12 @@ type WorkloadReference struct {
 	Namespace string `json:"namespace"`
 
 	// Kind is the kind of the workload controller (e.g., Deployment, StatefulSet, DaemonSet)
-	// +optional
-	Kind string `json:"kind,omitempty"`
+	// +required
+	Kind string `json:"kind"`
+
+	// HealthyReplicas is the number of replicas that must be healthy for approval.
+	// +required
+	HealthyReplicas int32 `json:"healthyReplicas"`
 }
 
 // +genclient

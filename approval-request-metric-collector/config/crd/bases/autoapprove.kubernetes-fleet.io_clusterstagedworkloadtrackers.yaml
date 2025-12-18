@@ -48,6 +48,11 @@ spec:
             items:
               description: WorkloadReference represents a workload to be tracked
               properties:
+                healthyReplicas:
+                  description: HealthyReplicas is the number of replicas that must
+                    be healthy for approval.
+                  format: int32
+                  type: integer
                 kind:
                   description: Kind is the kind of the workload controller (e.g.,
                     Deployment, StatefulSet, DaemonSet)
@@ -59,6 +64,8 @@ spec:
                   description: Namespace is the namespace of the workload
                   type: string
               required:
+              - healthyReplicas
+              - kind
               - name
               - namespace
               type: object

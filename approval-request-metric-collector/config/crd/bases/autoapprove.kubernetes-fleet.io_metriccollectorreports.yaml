@@ -83,7 +83,7 @@ spec:
                 description: CollectedMetrics contains the most recent metrics from
                   each workload.
                 items:
-                  description: WorkloadMetrics represents metrics collected from a
+                  description: WorkloadMetric represents metrics collected from a
                     single workload.
                   properties:
                     health:
@@ -92,6 +92,10 @@ spec:
                       type: boolean
                     namespace:
                       description: Namespace of the workload.
+                      type: string
+                    podName:
+                      description: PodName is the name of the specific pod that reported
+                        this metric.
                       type: string
                     workloadKind:
                       description: Kind of the workload controller (e.g., Deployment,
@@ -103,6 +107,7 @@ spec:
                   required:
                   - health
                   - namespace
+                  - podName
                   - workloadName
                   type: object
                 type: array

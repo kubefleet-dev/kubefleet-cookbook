@@ -265,6 +265,33 @@ func (r *Reconciler) ensureMetricCollectorReports(
 	return nil
 }
 
+// countHealthyPodsForWorkload counts the number of unique healthy pods for a given workload
+// from the collected metrics. It returns the count of healthy pods and the total count of pods found.
+func countHealthyPodsForWorkload(
+	collectedMetrics []autoapprovev1alpha1.WorkloadMetric,
+	workload autoapprovev1alpha1.WorkloadReference,
+) (healthyCount int32, totalCount int32) {
+	// Use a map to track unique pods and their health status
+	healthyPods := make(map[string]bool)
+	allPods := make(map[string]bool)
+
+	for _, metric := range collectedMetrics {
+		// Match workload by namespace, name, and kind
+		if metric.Namespace == workload.Namespace &&
+			metric.WorkloadName == workload.Name &&
+			workload.Kind == metric.WorkloadKind {
+			// Track all pods
+			allPods[metric.PodName] = true
+			// Track healthy pods
+			if metric.Health {
+				healthyPods[metric.PodName] = true
+			}
+		}
+	}
+
+	return int32(len(healthyPods)), int32(len(allPods))
+}
+
 // checkWorkloadHealthAndApprove checks if all workloads specified in ClusterStagedWorkloadTracker or StagedWorkloadTracker are healthy
 // across all clusters in the stage, and approves the ApprovalRequest if they are.
 func (r *Reconciler) checkWorkloadHealthAndApprove(
@@ -351,51 +378,51 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 
 		// Check if all workloads from WorkloadTracker are present and healthy
 		for _, trackedWorkload := range workloads {
-			found := false
-			healthy := false
+			// Aggregate metrics for all pods of this workload
+			healthyPodCount, totalPodCount := countHealthyPodsForWorkload(report.Status.CollectedMetrics, trackedWorkload)
+			expectedHealthyReplicas := trackedWorkload.HealthyReplicas
 
-			// Important: Simplified health check using first matching metric
-			// When a workload has multiple pods/replicas, the MetricCollectorReport will contain
-			// multiple WorkloadMetrics entries (one per pod). This implementation uses the FIRST
-			// matching metric to determine workload health.
-			//
-			// Limitation: If different pods report different health states, only the first one
-			// encountered is used for approval decisions.
-			//
-			// To implement aggregation logic (e.g., all pods must be healthy, or majority healthy):
-			// 1. Remove the 'break' statement below
-			// 2. Collect all matching metrics into a slice
-			// 3. Apply your aggregation logic (e.g., allHealthy := all metrics have Health==true)
-			// 4. Set 'healthy' based on the aggregated result
-			for _, collectedMetric := range report.Status.CollectedMetrics {
-				// Match workload by namespace, name, and kind.
-				if collectedMetric.Namespace == trackedWorkload.Namespace &&
-					collectedMetric.WorkloadName == trackedWorkload.Name &&
-					trackedWorkload.Kind == collectedMetric.WorkloadKind {
-					found = true
-					healthy = collectedMetric.Health
-					klog.V(2).InfoS("Workload metric found", "approvalRequest", approvalReqRef, "cluster", clusterName, "workload", trackedWorkload.Name, "namespace", trackedWorkload.Namespace, "kind", trackedWorkload.Kind, "healthy", healthy)
-					break // Remove this to collect all metrics for aggregation
-				}
-			}
-
-			if !found {
+			if totalPodCount == 0 {
 				klog.V(2).InfoS("Workload not found in MetricCollectorReport", "approvalRequest", approvalReqRef, "cluster", clusterName, "workload", trackedWorkload.Name, "namespace", trackedWorkload.Namespace)
 				allHealthy = false
 				unhealthyDetails = append(unhealthyDetails,
 					fmt.Sprintf("cluster %s: workload %s/%s not found", clusterName, trackedWorkload.Namespace, trackedWorkload.Name))
-			} else if !healthy {
-				klog.V(2).InfoS("Workload is not healthy", "approvalRequest", approvalReqRef, "cluster", clusterName, "workload", trackedWorkload.Name, "namespace", trackedWorkload.Namespace)
+				continue
+			}
+
+			// Check if we have enough healthy replicas
+			if healthyPodCount < expectedHealthyReplicas {
+				klog.V(2).InfoS("Workload does not have enough healthy replicas",
+					"approvalRequest", approvalReqRef,
+					"cluster", clusterName,
+					"workload", trackedWorkload.Name,
+					"namespace", trackedWorkload.Namespace,
+					"kind", trackedWorkload.Kind,
+					"healthyPods", healthyPodCount,
+					"totalPods", totalPodCount,
+					"expectedHealthy", expectedHealthyReplicas)
 				allHealthy = false
 				unhealthyDetails = append(unhealthyDetails,
-					fmt.Sprintf("cluster %s: workload %s/%s unhealthy", clusterName, trackedWorkload.Namespace, trackedWorkload.Name))
+					fmt.Sprintf("cluster %s: workload %s/%s has %d/%d healthy pods, expected %d",
+						clusterName, trackedWorkload.Namespace, trackedWorkload.Name,
+						healthyPodCount, totalPodCount, expectedHealthyReplicas))
+			} else {
+				klog.V(2).InfoS("Workload has sufficient healthy replicas",
+					"approvalRequest", approvalReqRef,
+					"cluster", clusterName,
+					"workload", trackedWorkload.Name,
+					"namespace", trackedWorkload.Namespace,
+					"kind", trackedWorkload.Kind,
+					"healthyPods", healthyPodCount,
+					"totalPods", totalPodCount,
+					"expectedHealthy", expectedHealthyReplicas)
 			}
 		}
 	}
 
 	// If all workloads are healthy across all clusters, approve the ApprovalRequest
 	if allHealthy {
-		klog.InfoS("All workloads are healthy, approving ApprovalRequest", "approvalRequest", approvalReqRef, "clusters", clusterNames, "workloads", len(workloads))
+		klog.InfoS("All workloads meet healthy replica requirements, approving ApprovalRequest", "approvalRequest", approvalReqRef, "clusters", clusterNames, "workloads", len(workloads))
 
 		status := approvalReqObj.GetApprovalRequestStatus()
 		// we have already checked that the condition is not present or not true.
@@ -404,7 +431,7 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 			Status:             metav1.ConditionTrue,
 			ObservedGeneration: approvalReqObj.GetGeneration(),
 			Reason:             "AllWorkloadsHealthy",
-			Message:            fmt.Sprintf("All %d workloads are healthy across %d clusters", len(workloads), len(clusterNames)),
+			Message:            fmt.Sprintf("All %d workloads have sufficient healthy replicas across %d clusters", len(workloads), len(clusterNames)),
 		})
 
 		approvalReqObj.SetApprovalRequestStatus(*status)
@@ -414,7 +441,7 @@ func (r *Reconciler) checkWorkloadHealthAndApprove(
 		}
 
 		klog.InfoS("Successfully approved ApprovalRequest", "approvalRequest", approvalReqRef)
-		r.recorder.Event(approvalReqObj, "Normal", "Approved", fmt.Sprintf("All %d workloads are healthy across %d clusters in stage %s", len(workloads), len(clusterNames), stageName))
+		r.recorder.Event(approvalReqObj, "Normal", "Approved", fmt.Sprintf("All %d workloads have sufficient healthy replicas across %d clusters in stage %s", len(workloads), len(clusterNames), stageName))
 
 		// Approval successful or already approved
 		return nil

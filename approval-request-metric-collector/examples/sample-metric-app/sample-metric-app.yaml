@@ -6,7 +6,7 @@ metadata:
   labels:
     app: sample-metric-app
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: sample-metric-app
@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
       - name: metric-app
-        image: arvindacr.azurecr.io/metric-app:latest
+        image: myfleetacr.azurecr.io/metric-app:latest
         imagePullPolicy: Always
         env:
         - name: WORKLOAD_KIND

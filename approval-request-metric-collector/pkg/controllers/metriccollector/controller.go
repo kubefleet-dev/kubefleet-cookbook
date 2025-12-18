@@ -109,8 +109,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 // collectAllWorkloadMetrics queries Prometheus for all workload_health metrics
-func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient PrometheusClient) ([]autoapprovev1alpha1.WorkloadMetrics, error) {
-	var collectedMetrics []autoapprovev1alpha1.WorkloadMetrics
+func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient PrometheusClient) ([]autoapprovev1alpha1.WorkloadMetric, error) {
+	var collectedMetrics []autoapprovev1alpha1.WorkloadMetric
 
 	// Query all workload_health metrics (no filtering)
 	query := "workload_health"
@@ -129,17 +129,20 @@ func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient P
 	// Extract metrics from Prometheus result
 	for _, res := range data.Result {
 		// Extract labels from the Prometheus metric
-		// The workload_health metric includes labels like: workload_health{namespace="test-ns",app="sample-app",workload_kind="Deployment"}
+		// The workload_health metric includes labels like: workload_health{namespace="test-ns",app="sample-app",workload_kind="Deployment",pod="sample-app-xxx"}
 		// These labels come from Kubernetes pod labels and are added by Prometheus during scraping.
 		// The relabeling configuration is in examples/prometheus/configmap.yaml:
 		//   - namespace: from __meta_kubernetes_namespace (pod's namespace)
 		//   - app: from __meta_kubernetes_pod_label_app (pod's "app" label)
 		//   - workload_kind: from __meta_kubernetes_pod_controller_kind (controller kind)
+		//   - pod: from __meta_kubernetes_pod_name (pod name)
 		namespace := res.Metric["namespace"]
 		workloadName := res.Metric["app"]
 		workloadKind := res.Metric["workload_kind"]
+		podName := res.Metric["pod"]
 
-		if namespace == "" || workloadName == "" {
+		if namespace == "" || workloadName == "" || workloadKind == "" || podName == "" {
+			klog.V(4).InfoS("Skipping metric with missing required labels", "namespace", namespace, "workload", workloadName, "kind", workloadKind, "pod", podName)
 			continue
 		}
 
@@ -166,7 +169,8 @@ func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient P
 		// We use >= instead of == to handle floating point precision issues that can occur
 		// during JSON serialization/deserialization. The metric app emits 1.0 for healthy
 		// and 0.0 for unhealthy, so >= 1.0 safely distinguishes between the two states.
-		workloadMetrics := autoapprovev1alpha1.WorkloadMetrics{
+		workloadMetrics := autoapprovev1alpha1.WorkloadMetric{
+			PodName:      podName,
 			WorkloadName: workloadName,
 			Namespace:    namespace,
 			WorkloadKind: workloadKind,

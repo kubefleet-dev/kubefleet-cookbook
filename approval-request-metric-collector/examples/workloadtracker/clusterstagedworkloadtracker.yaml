@@ -7,3 +7,6 @@ workloads:
   - name: sample-metric-app
     namespace: test-ns
     kind: Deployment
+    # Number of replicas that must be healthy for approval
+    # If the deployment has 3 replicas, at least 2 must report healthy
+    healthyReplicas: 2
