@@ -6,4 +6,4 @@ spec:
   placementName: example-crp
   resourceSnapshotIndex: "0"
   stagedRolloutStrategyName: example-cluster-staged-strategy
-  state: Started
+  state: Run

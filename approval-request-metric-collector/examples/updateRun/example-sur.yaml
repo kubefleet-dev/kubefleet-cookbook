@@ -7,4 +7,4 @@ spec:
   placementName: example-rp
   resourceSnapshotIndex: "0"
   stagedRolloutStrategyName: example-staged-strategy
-  state: Started
+  state: Run

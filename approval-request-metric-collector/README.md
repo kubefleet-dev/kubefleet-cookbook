@@ -266,7 +266,7 @@ Before starting this tutorial, ensure you have:
 - Three member clusters joined to the hub cluster
 - kubectl configured with access to the hub cluster context
 
-> Note: This can be achieved by https://kubefleet.dev/docs/getting-started/, also set the enable-workload flag to true, to be able to install approval-controller on hub cluster successfully, the flag is defined in https://github.com/kubefleet-dev/kubefleet/blob/main/cmd/hubagent/options/options.go
+> Note: This can be achieved by https://kubefleet.dev/docs/getting-started/, also set the enableWorkload flag to true on hub-agent helm install, to be able to install approval-controller on hub cluster successfully, the flag is defined in https://github.com/kubefleet-dev/kubefleet/blob/main/cmd/hubagent/options/options.go
 
 ### 1. Label Member Clusters for Staged Rollout
 

@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
       - name: metric-app
-        image: myfleetacr.azurecr.io/metric-app:latest
+        image: your-registry.example.com/metric-app:latest
         imagePullPolicy: Always
         env:
         - name: WORKLOAD_KIND
