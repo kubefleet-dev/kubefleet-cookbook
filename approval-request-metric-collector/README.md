@@ -68,23 +68,22 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
 
    **Important Note on Multiple Pods:** When a workload (e.g., a Deployment) has multiple pods/replicas emitting health signals:
    - The metric collector **collects all metrics** from Prometheus and stores them in the MetricCollectorReport
-   - If `sample-metric-app` has 3 replicas, the report will contain 3 separate `WorkloadMetric` entries
-   - However, for simplicity, the approval-request-controller only evaluates the **first matching metric** when checking workload health
-   - This means if the first pod reports healthy, the workload is considered healthy, even if other pods report differently
-   - This simplified approach works well when all pods of a workload consistently report the same health status
-   - **Limitation:** If pods have different health states, only the first metric encountered is used for approval decisions
+   - If `sample-metric-app` has 3 replicas, the report will contain 3 separate `WorkloadMetric` entries (one per pod)
+   - The approval-request-controller **aggregates metrics from all pods** to determine workload health
+   - You specify the required number of healthy replicas in the WorkloadTracker using the `healthyReplicas` field
+   - The controller counts the number of healthy pods and compares it to the required count
+   - Approval is granted only when `healthy_pod_count >= healthyReplicas`
    
-   **Customizing Health Aggregation Logic:**
-   To implement more sophisticated health checks (e.g., all pods must be healthy, or majority healthy):
-   1. Edit `pkg/controllers/approvalrequest/controller.go` in the approval-request-controller
-   2. Locate the health check loop (search for "Simplified health check using first matching metric")
-   3. Remove the `break` statement that stops at the first match
-   4. Collect all matching metrics for the workload into a slice
-   5. Implement your aggregation logic:
-      - **All healthy:** Check that every metric has `Health == true`
-      - **Majority healthy:** Count healthy metrics and compare to total
-      - **Threshold-based:** Require N out of M pods to be healthy
-   6. Rebuild and redeploy the approval-request-controller image
+   **Example WorkloadTracker Configuration:**
+   ```yaml
+   workloads:
+     - name: sample-metric-app
+       namespace: test-ns
+       kind: Deployment
+       healthyReplicas: 2  # Requires at least 2 healthy pods for approval
+   ```
+   
+   If your deployment has 3 replicas and you set `healthyReplicas: 2`, the controller will approve when at least 2 out of 3 pods report as healthy. This provides flexibility for rolling updates and allows some pods to be unhealthy during deployments while still meeting your reliability requirements.
 
 4. **Health Evaluation**
    - Approval-request-controller monitors `MetricCollectorReports` from all stage clusters
@@ -107,47 +106,22 @@ This solution introduces three new CRDs that work together with KubeFleet's nati
 
 ## Prerequisites
 
-- Docker for building images
-- Azure CLI (`az`) for ACR operations
+- Docker for building and pushing images
+- Container registry (Docker Hub, GHCR, or any OCI-compliant registry) with push access
 - kubectl configured with access to your clusters
 - Helm 3.x
 - KubeFleet installed on hub and member clusters
-- Azure Container Registry (ACR) with anonymous pull enabled
 
-## Building and Pushing Images to ACR
+## Building and Pushing Images
 
-Before installing the controllers, you need to build the Docker images and push them to Azure Container Registry (ACR).
+Before installing the controllers, you need to build the Docker images and push them to a container registry (Docker Hub, GHCR, or any OCI-compliant registry with push access).
 
-**Critical Note:** Enable anonymous pull on the ACR so that clusters can pull images without authentication. Ensure to disable anonymous pull or delete the ACR after testing.
+### 1. Build and Push Images
 
-### 1. Create ACR with Anonymous Pull
-
-Create a resource group and ACR with Standard SKU (Basic SKU doesn't support anonymous pull):
+Export your registry URL and tag variables:
 
 ```bash
-# Create resource group
-az group create --name test-kubefleet-rg --location eastus
-
-# Create container registry with Standard SKU
-az acr create --resource-group test-kubefleet-rg --name myfleetacr --sku Standard
-
-# Login to ACR
-az acr login --name myfleetacr
-
-# Enable anonymous pull
-az acr update --name myfleetacr --anonymous-pull-enabled
-```
-
-From the `az acr create` output, note down the login server (e.g., `myfleetacr.azurecr.io`).
-
-> Note: Users can also create their own registry to push their docker images, it doesn't have to be ACR.
-
-### 2. Build and Push Images
-
-Export registry and tag variables:
-
-```bash
-export REGISTRY="myfleetacr.azurecr.io"
+export REGISTRY="your-registry.example.com"
 export TAG="latest"
 
 cd approval-request-metric-collector
@@ -156,7 +130,7 @@ cd approval-request-metric-collector
 Build and push all images at once, to build for a specific architecture (default is your system's architecture):
 
 ```bash
-# For AMD64 (x86_64), ARCH used by AKS fleet, clusters.
+# For AMD64 (x86_64)
 make docker-build-all GOARCH=amd64
 
 # For ARM64 (Apple Silicon, ARM servers)
@@ -176,45 +150,7 @@ make docker-build-metric-collector
 make docker-build-metric-app
 ```
 
-### 3. Verify Images in ACR
-
-List images in your ACR:
-
-```bash
-az acr repository list --name myfleetacr --output table
-```
-
-Expected output:
-```
-Result
----------------------------
-approval-request-controller
-metric-app
-metric-collector
-```
-
-Verify tags for a specific image:
-
-```bash
-az acr repository show-tags --name myfleetacr --repository approval-request-controller --output table
-```
-
-Expected output:
-```
-Result
---------
-latest
-```
-
-**You're now ready to proceed with the setup!** Your ACR contains all three required images that will be pulled by your clusters.
-
-### 4. Cleanup (After Testing)
-
-When you're done testing, delete the resource group to clean up all resources:
-
-```bash
-az group delete --name test-kubefleet-rg
-```
+**Important:** Verify that the images are present in your container registry and are accessible from your clusters before proceeding with the setup.
 
 ## Setup Overview
 
@@ -330,9 +266,7 @@ Before starting this tutorial, ensure you have:
 - Three member clusters joined to the hub cluster
 - kubectl configured with access to the hub cluster context
 
-This can be achieved through a number of ways,
-- https://kubefleet.dev/docs/getting-started/
-- https://learn.microsoft.com/en-us/azure/kubernetes-fleet/quickstart-create-fleet-and-members-portal
+> Note: This can be achieved by https://kubefleet.dev/docs/getting-started/, also set the enable-workload flag to true, to be able to install approval-controller on hub cluster successfully, the flag is defined in https://github.com/kubefleet-dev/kubefleet/blob/main/cmd/hubagent/options/options.go
 
 ### 1. Label Member Clusters for Staged Rollout
 
@@ -357,13 +291,6 @@ The `StagedUpdateStrategy` uses these labels to select clusters for each stage:
 
 **Labeling Options:**
 
-For **Azure-managed member clusters** (joined via Azure portal/CLI):
-```bash
-az fleet member update -g <resourceGroupName> -f <fleetName> -n <memberClusterName> --labels "<labelKey>=<labelValue>"
-```
-> **Note:** Member clusters joined via Azure portal or CLI have a validating webhook that prevents direct kubectl modifications. You must use the `az fleet member update` command and cannot use `kubectl label` or `kubectl edit`.
-
-For **manually created member clusters** (e.g., kind clusters):
 ```bash
 # Option 1: Add labels using kubectl label
 kubectl label membercluster <cluster-name> environment=staging
@@ -435,18 +362,16 @@ This is necessary because Prometheus's `__meta_kubernetes_pod_controller_kind` r
 
 ### 4. Install Approval Request Controller (Hub Cluster)
 
-Install the approval request controller on the hub cluster using the ACR registry:
-
 ```bash
-# Set your ACR registry name
-export REGISTRY="myfleetacr.azurecr.io"
+# Set your registry URL
+export REGISTRY="your-registry.example.com"
 
 # Run the installation script
 scripts/install-on-hub.sh ${REGISTRY} <hub-context>
 ```
 
 The script performs the following:
-1. Configures the controller to use the approval-request-controller image from your ACR
+1. Configures the controller to use the approval-request-controller image from your registry
 2. Verifies that required KubeFleet CRDs are installed
 3. Installs the controller via Helm with the custom CRDs (MetricCollectorReport, ClusterStagedWorkloadTracker, StagedWorkloadTracker)
 4. Verifies the installation
