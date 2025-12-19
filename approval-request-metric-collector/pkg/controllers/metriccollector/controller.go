@@ -129,13 +129,19 @@ func (r *Reconciler) collectAllWorkloadMetrics(ctx context.Context, promClient P
 	// Extract metrics from Prometheus result
 	for _, res := range data.Result {
 		// Extract labels from the Prometheus metric
-		// The workload_health metric includes labels like: workload_health{namespace="test-ns",app="sample-app",workload_kind="Deployment",pod="sample-app-xxx"}
-		// These labels come from Kubernetes pod labels and are added by Prometheus during scraping.
-		// The relabeling configuration is in examples/prometheus/configmap.yaml:
-		//   - namespace: from __meta_kubernetes_namespace (pod's namespace)
-		//   - app: from __meta_kubernetes_pod_label_app (pod's "app" label)
-		//   - workload_kind: from __meta_kubernetes_pod_controller_kind (controller kind)
-		//   - pod: from __meta_kubernetes_pod_name (pod name)
+		// The workload_health metric includes labels like: workload_health{namespace="test-ns",app="sample-metric-app",workload_kind="Deployment",pod="sample-metric-app-xxx"}
+		// These labels come from multiple sources:
+		//   1. Kubernetes metadata: Prometheus discovers pods and extracts metadata during service discovery
+		//   2. Pod labels: The "app" label comes from the pod's metadata.labels.app, which is set in the Deployment's pod template
+		//      and propagated to all pods. This label contains the parent workload name (e.g., Deployment name like "sample-metric-app"),
+		//      not the intermediate controller name (e.g., ReplicaSet name like "sample-metric-app-565fd6595b")
+		//   3. Application metrics: The "workload_kind" label is emitted by the metric app itself (configured via WORKLOAD_KIND env var)
+		//
+		// The Prometheus relabeling configuration (examples/prometheus/configmap.yaml) maps these sources:
+		//   - namespace: from __meta_kubernetes_namespace (pod's namespace extracted by Prometheus during service discovery)
+		//   - app: from __meta_kubernetes_pod_label_app (pod's "app" label, which contains the parent workload name like "sample-metric-app")
+		//   - workload_kind: preserved from the metric itself (emitted by the application, not relabeled)
+		//   - pod: from __meta_kubernetes_pod_name (pod name extracted by Prometheus during service discovery)
 		namespace := res.Metric["namespace"]
 		workloadName := res.Metric["app"]
 		workloadKind := res.Metric["workload_kind"]
