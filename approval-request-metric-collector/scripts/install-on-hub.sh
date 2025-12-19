@@ -23,7 +23,7 @@ REGISTRY="$1"
 HUB_CLUSTER="$2"
 IMAGE_NAME="approval-request-controller"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
-NAMESPACE="fleet-system"
+NAMESPACE="approval-system"
 CHART_NAME="approval-request-controller"
 
 # Get hub cluster context using kubectl config view (following kubefleet pattern)
@@ -85,6 +85,7 @@ echo "Step 2: Installing helm chart on hub cluster..."
 helm upgrade --install ${CHART_NAME} ${REPO_ROOT}/charts/${CHART_NAME} \
   --kube-context=${HUB_CONTEXT} \
   --namespace ${NAMESPACE} \
+  --create-namespace \
   --set image.repository=${IMAGE_REPOSITORY} \
   --set image.tag=${IMAGE_TAG} \
   --set image.pullPolicy=Always \

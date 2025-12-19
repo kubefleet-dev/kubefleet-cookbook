@@ -600,8 +600,8 @@ The approval controller will automatically approve stages when the metric collec
 On the hub cluster:
 ```bash
 kubectl config use-context <hub-context>
-kubectl get pods -n fleet-system
-kubectl logs -n fleet-system deployment/approval-request-controller -f
+kubectl get pods -n approval-system
+kubectl logs -n approval-system deployment/approval-request-controller -f
 ```
 
 On member clusters:
