@@ -1,0 +1,38 @@
+apiVersion: cluster.kubernetes-fleet.io/v1beta1
+kind: MemberCluster
+metadata:
+  name: kind-cluster-1
+  labels:
+    environment: staging
+spec:
+  identity:
+    name: fleet-member-agent-cluster-1
+    kind: ServiceAccount
+    namespace: fleet-system
+    apiGroup: ""
+---
+apiVersion: cluster.kubernetes-fleet.io/v1beta1
+kind: MemberCluster
+metadata:
+  name: kind-cluster-2
+  labels:
+    environment: prod
+spec:
+  identity:
+    name: fleet-member-agent-cluster-2
+    kind: ServiceAccount
+    namespace: fleet-system
+    apiGroup: ""
+---
+apiVersion: cluster.kubernetes-fleet.io/v1beta1
+kind: MemberCluster
+metadata:
+  name: kind-cluster-3
+  labels:
+    environment: prod
+spec:
+  identity:
+    name: fleet-member-agent-cluster-3
+    kind: ServiceAccount
+    namespace: fleet-system
+    apiGroup: ""

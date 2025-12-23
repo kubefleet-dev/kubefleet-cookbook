@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-metric-app
+  namespace: test-ns
+  labels:
+    app: sample-metric-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sample-metric-app
+  template:
+    metadata:
+      labels:
+        app: sample-metric-app
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: metric-app
+        image: your-registry.example.com/metric-app:latest
+        imagePullPolicy: Always
+        env:
+        - name: WORKLOAD_KIND
+          value: "Deployment"
+        ports:
+        - containerPort: 8080
